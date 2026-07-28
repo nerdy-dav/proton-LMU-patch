@@ -41,10 +41,39 @@ so most of `../lmu/` does not apply unchanged.
 | 0009 | 0005 | **Layers.** The real rebase — see below. |
 | 0010 | 0006 | Tint compositing in `DrawImage` and the sprite tint in the pixel shader. One fixup: its declarations of the 0001 fields were dropped as already present; only `struct d2d_effect.output` was taken from that hunk. |
 | 0011 | 0008 + 0010 | The `device.c` halves of both fix patches — the `const` drop on `d2d_layer_stack_push` plus declaration hoists in the Layers and DrawImage paths. |
+| 0012 | (new) | `IDirectInput7::FindDevice` — wheel hotplug. Replaces `../lmu/0009`+`0011`, see below. |
 
-Not carried: `../lmu/0009` and `0011` (`IDirectInput7::FindDevice`, hotplug).
-0009 applies but 0011, which fixes a real bug in it, does not; they have to move
-together and neither is needed for the UI.
+## Hotplug (0012)
+
+`../lmu/0009` and `0011` are **not** carried. 0012 supersedes both, and it is
+written against a log rather than a guess.
+
+`../lmu/0011` assumed callers pass a device *name* and that 0009's path-based
+lookup "fails for every real caller". A `WINEDEBUG=+dinput` capture of LMU on
+2026-07-28, unplugging and reconnecting a Simagic wheel mid-session, shows the
+opposite — LMU passes a device interface path:
+
+```
+fixme:dinput:dinput7_FindDevice ... name L"\\?\HID#VID_3514&PID_000E#273&337935523333&0&0&0#{4d1e55b2-...}" stub!
+trace:dinput:dinput8_a_CreateDevice ... guid {a9ce5bb0-0000-0000-406e-d0f8ff6f0000}
+warn:dinput:get_instance_from_guid guid {a9ce5bb0-0000-0000-406e-d0f8ff6f0000} not found
+```
+
+The stub returns `DI_OK` without writing `*pguidInstance`, so LMU passes
+uninitialised stack memory (note the `406e-d0f8ff6f0000` tail — a stack address,
+different on every call) to `CreateDevice`, which fails. The wheel is never
+re-acquired.
+
+The lookup needs no new bookkeeping: the same log shows `joystick_cache` already
+holds that exact path against instance `{ae42ba3a-804c-11f1-8001-000044455354}`.
+0012 calls `hid_joystick_refresh_devices()`, then matches the caller's string
+against `entry->path` — folded to lowercase, since `cache_entry_create()`
+lowercases what it stores — falling back to `tszInstanceName`/`tszProductName`
+so name-passing callers work too. That fallback is what `../lmu/0011` was
+reaching for; keeping both makes 0012 a strict superset.
+
+Note this is a stock-wine bug, not a cachyos divergence: GE-Proton ships the
+same stub.
 
 ## The Layers rebase (0009)
 
@@ -85,6 +114,44 @@ An earlier build of this series without Layers/Tint got onto the track but with
 a completely broken UI — that is what the Layers rebase fixed, and it is the
 symptom to expect if 0008–0011 ever fail to apply after a rebase onto a newer
 cachyos branch.
+
+**0012 builds.** `./build.sh cachyos cachyos_11.0_20260713/main` succeeds with the
+12-patch series (15m07s); the shipped `dinput.dll` and `dinput8.dll`, both arches,
+contain `hid_joystick_find_device` and the `matched instance` trace, and no longer
+contain the `FindDevice ... stub!` string.
+
+**0012 verified in-game** on 2026-07-28, Simagic wheel unplugged and reconnected
+mid-session on track:
+
+```
+hid_joystick_find_device ... matched instance {ae42ba3a-804c-11f1-8001-000044455354}
+dinput8_a_CreateDevice   ... guid {ae42ba3a-804c-11f1-8001-000044455354}
+hid_joystick_device_try_open detected device type 0x10214
+dinput_device_Acquire
+hid_joystick_send_force_feedback_command ... command 0x1
+```
+
+The wheel is re-acquired and force feedback resumes. `get_instance_from_guid ...
+not found` — the failure signature of the old stub — appears zero times in the
+whole log.
+
+Expect one benign miss per reconnect:
+
+```
+warn:dinput:hid_joystick_find_device name L"\\?\HID#VID_3514&PID_0001&MI_00#..." not found
+```
+
+LMU also asks about the Simagic base's second HID interface, which is not a
+joystick and so is legitimately not in `joystick_cache`. `DIERR_DEVICENOTREG` is
+the correct answer and the game drops it without calling `CreateDevice`. Under the
+old stub this same call returned `DI_OK` with an uninitialised GUID.
+
+Re-check after any rebase with:
+
+```
+WINEDEBUG=+dinput PROTON_LOG=1 %command%
+grep -E "FindDevice|matched instance|get_instance_from_guid" ~/steam-2399420.log
+```
 
 ### Gotcha when iterating
 

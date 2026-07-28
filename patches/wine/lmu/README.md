@@ -11,10 +11,11 @@ HRESULT and dereferences NULL. Confirmed via `EXCEPTION_ACCESS_VIOLATION`
 
 ## Applying
 
-From the repo root, with submodules initialised:
+`build.sh` does this for you. By hand, from the source tree with submodules
+initialised:
 
-    cd wine
-    git am ../patches/lmu/*.patch
+    cd GE-Proton11-3-src/wine
+    git am ../../patches/wine/lmu/*.patch
 
 ## Contents
 
@@ -28,9 +29,9 @@ From the repo root, with submodules initialised:
 | 0006 | Draw a Tint effect's input bitmap in `DrawImage`; sprite tint in the pixel shader |
 | 0007 | Derive `guidInstance` from crc32(names)+serial+VID/PID so wheel bindings persist |
 | 0008 | Build fix |
-| 0009 | `IDirectInput7::FindDevice` — lets LMU handle hotplugged devices |
+| 0009 | `IDirectInput7::FindDevice` — first cut, superseded by 0011 |
 | 0010 | Hoist declarations (`-Werror=declaration-after-statement`) |
-| 0011 | Fix 0009: look `FindDevice` up by name, not by path |
+| 0011 | `IDirectInput7::FindDevice` via the joystick cache — **wheel hotplug** |
 
 ## Dropped from the original series
 
@@ -59,21 +60,52 @@ From the repo root, with submodules initialised:
 
 ## Fixes on top of the original series
 
-- **0011** repairs 0009. The upstream `FindDevice` was a stub that returned `DI_OK`
-  without writing `*pguidInstance`; 0009 replaced it with a lookup that feeds the
-  caller's device *name* to `hid_joystick_device_try_open()`, which `CreateFileW`s
-  its argument as a *path*. That fails for every real caller, so 0009 turned a
-  silent no-op into a hard failure and hotplug never actually worked — not here and
-  not on the GE-Proton10-34 build this series came from. 0011 searches the joystick
-  cache by instance/product name instead.
+**0011 rewrites 0009.** Both fix the same real bug: upstream's `FindDevice` is a
+stub that returns `DI_OK` without writing `*pguidInstance`, so the caller passes
+uninitialised stack memory to `CreateDevice`.
 
-## Not verified
+0009 replaced the stub with a lookup that feeds the caller's string to
+`hid_joystick_device_try_open()`. An earlier version of 0011 assumed that was
+wrong because callers pass a device *name* while `try_open` `CreateFileW`s its
+argument as a *path*, and looked the name up instead. A `WINEDEBUG=+dinput`
+capture of LMU on 2026-07-28 — Simagic wheel unplugged and reconnected mid-session
+— settled it: LMU passes a device interface **path**, so the name-only lookup
+would have missed every time.
 
-These compile-level resolutions have not been built or run. In particular, whether
-SpriteBatch/Layers still composite correctly against upstream's reworked d2d1 effect
-pipeline needs an actual race in-game.
+0009 and 0010 are kept as-is (0010 patches both `dinput7_FindDevice` and
+`hid_joystick_find_device`, so 0009 cannot simply be dropped). 0011 now replaces
+the implementation with the one proven on cachyos as `../lmu-cachyos/0012`:
 
-0011 has **not been compiled** — the mingw toolchain lives in the build container, not
-on the host — and it is a hypothesis about the failure, not a confirmed diagnosis:
-the bug it fixes is real, but whether LMU calls `FindDevice` on hotplug still needs a
-`WINEDEBUG=+dinput` log to confirm.
+- `hid_joystick_refresh_devices()` first, since the device may have just been
+  plugged back in;
+- match the caller's string against the cached device interface **path**, folded
+  to lowercase because `cache_entry_create()` lowercases what it stores;
+- fall back to `tszInstanceName`/`tszProductName`, so name-passing callers work
+  too — a strict superset of both earlier attempts;
+- `DIERR_DEVICENOTREG` when nothing matches, instead of `DI_OK` with a garbage
+  GUID.
+
+The two series are now in sync on this fix; the only difference is that GE keeps
+it as a rewrite of 0009 while cachyos never carried 0009 and has it as a single
+patch.
+
+## Status
+
+**Builds.** `./build.sh ge GE-Proton11-3` applies all 11 patches cleanly onto
+`9578fa3613f` and produces a complete tool tree and tarball. See the root
+[README Status](../../../README.md#status) for what has been run in-game.
+
+The d2d1 conflict resolutions listed above are compile-level. The equivalent
+patches on the cachyos side are verified in-game (LMU loads onto the track, UI
+renders correctly), but GE's `d2d1` is a different tree, so a garbled UI here
+would mean 0004–0006 need another look rather than that the approach is wrong.
+
+The hotplug fix in 0011 is verified in-game on cachyos (`../lmu-cachyos/README.md`
+has the log). GE ships the same implementation, and the shipped `dinput.dll` /
+`dinput8.dll` were checked to contain it, but the reconnect has not been exercised
+on a GE build. Re-check with:
+
+```
+WINEDEBUG=+dinput PROTON_LOG=1 %command%
+grep -E "FindDevice|matched instance|get_instance_from_guid" ~/steam-2399420.log
+```

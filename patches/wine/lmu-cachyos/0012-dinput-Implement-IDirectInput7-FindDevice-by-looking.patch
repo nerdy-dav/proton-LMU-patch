@@ -1,0 +1,119 @@
+From e85bb7a35457f767eaddf9d2bc18c65a9b1c6b84 Mon Sep 17 00:00:00 2001
+From: pipodi <pipodi93@gmail.com>
+Date: Tue, 28 Jul 2026 16:46:20 +0200
+Subject: [PATCH] dinput: Implement IDirectInput7::FindDevice by looking up the
+ joystick cache
+
+The stub returned DI_OK without writing *pguidInstance, so callers passed
+uninitialised stack memory straight to CreateDevice. Le Mans Ultimate does
+exactly this when a wheel is unplugged and plugged back in mid-session:
+
+  fixme:dinput:dinput7_FindDevice ... name L"\\\\?\\HID#VID_3514&PID_000E#..." stub!
+  trace:dinput:dinput8_a_CreateDevice ... guid {a9ce5bb0-0000-0000-406e-d0f8ff6f0000}
+  warn:dinput:get_instance_from_guid guid {a9ce5bb0-0000-0000-406e-d0f8ff6f0000} not found
+
+so the wheel is never re-acquired. Refresh the device list, then match the
+caller's string against the cached device interface path (what LMU passes)
+or the instance/product name, and return the cached guidInstance.
+---
+ dlls/dinput/dinput.c         | 16 ++++++++++---
+ dlls/dinput/dinput_private.h |  1 +
+ dlls/dinput/joystick_hid.c   | 46 ++++++++++++++++++++++++++++++++++++
+ 3 files changed, 60 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/dinput/dinput.c b/dlls/dinput/dinput.c
+index 4a28b4240fd..ba04c98e3a2 100644
+--- a/dlls/dinput/dinput.c
++++ b/dlls/dinput/dinput.c
+@@ -259,9 +259,19 @@ static HRESULT WINAPI dinput7_RunControlPanel( IDirectInput7W *iface, HWND owner
+ 
+ static HRESULT WINAPI dinput7_FindDevice( IDirectInput7W *iface, const GUID *guid, const WCHAR *name, GUID *instance_guid )
+ {
+-    FIXME( "iface %p, guid %s, name %s, instance_guid %s stub!\n", iface, debugstr_guid( guid ),
+-           debugstr_w(name), debugstr_guid( instance_guid ) );
+-    return DI_OK;
++    HRESULT hr;
++
++    TRACE( "iface %p, guid %s, name %s, instance_guid %p.\n", iface, debugstr_guid( guid ),
++           debugstr_w( name ), instance_guid );
++
++    if (!name || !instance_guid) return E_POINTER;
++
++    /* The device may have just been plugged back in, so re-scan before looking
++     * it up. Returning DI_OK without writing instance_guid, as the old stub
++     * did, made callers pass uninitialised stack memory to CreateDevice. */
++    if (FAILED(hr = hid_joystick_refresh_devices())) return hr;
++
++    return hid_joystick_find_device( name, instance_guid );
+ }
+ 
+ static HRESULT WINAPI dinput7_CreateDeviceEx( IDirectInput7W *iface, const GUID *guid,
+diff --git a/dlls/dinput/dinput_private.h b/dlls/dinput/dinput_private.h
+index 0484feffd1c..095c90bfef3 100644
+--- a/dlls/dinput/dinput_private.h
++++ b/dlls/dinput/dinput_private.h
+@@ -58,6 +58,7 @@ extern HRESULT keyboard_create_device( struct dinput *dinput, const GUID *guid,
+ extern HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTANCEW *instance, DWORD version, int index );
+ extern HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDirectInputDevice8W **out );
+ extern HRESULT hid_joystick_refresh_devices(void);
++extern HRESULT hid_joystick_find_device( const WCHAR *name, GUID *guid );
+ extern void hid_joystick_cleanup_devices(void);
+ 
+ struct DevicePlayer {
+diff --git a/dlls/dinput/joystick_hid.c b/dlls/dinput/joystick_hid.c
+index 42f034f856e..b6c553a4bd3 100644
+--- a/dlls/dinput/joystick_hid.c
++++ b/dlls/dinput/joystick_hid.c
+@@ -274,6 +274,52 @@ static HRESULT get_instance_from_guid( const GUID *guid, DIDEVICEINSTANCEW *inst
+     return hr;
+ }
+ 
++/* IDirectInput7::FindDevice takes either a device interface path or a device
++ * name; Le Mans Ultimate passes a path when it re-acquires a hotplugged wheel.
++ * Cached paths are stored lowercased, so fold the caller's string the same way
++ * rather than pulling in a case-insensitive compare. */
++static BOOL cache_entry_matches( const struct cache_entry *entry, const WCHAR *folded )
++{
++    WCHAR buffer[MAX_PATH];
++
++    if (!wcscmp( entry->path, folded )) return TRUE;
++
++    lstrcpynW( buffer, entry->instance.tszInstanceName, ARRAY_SIZE(buffer) );
++    CharLowerW( buffer );
++    if (!wcscmp( buffer, folded )) return TRUE;
++
++    lstrcpynW( buffer, entry->instance.tszProductName, ARRAY_SIZE(buffer) );
++    CharLowerW( buffer );
++    return !wcscmp( buffer, folded );
++}
++
++HRESULT hid_joystick_find_device( const WCHAR *name, GUID *guid )
++{
++    struct cache_entry *entry;
++    WCHAR folded[MAX_PATH];
++    HRESULT hr = DIERR_DEVICENOTREG;
++
++    lstrcpynW( folded, name, ARRAY_SIZE(folded) );
++    CharLowerW( folded );
++
++    EnterCriticalSection( &joystick_cache_cs );
++
++    LIST_FOR_EACH_ENTRY( entry, &joystick_cache, struct cache_entry, entry )
++    {
++        if (!*entry->path) continue;
++        if (!cache_entry_matches( entry, folded )) continue;
++        *guid = entry->instance.guidInstance;
++        hr = DI_OK;
++        break;
++    }
++
++    LeaveCriticalSection( &joystick_cache_cs );
++
++    if (FAILED(hr)) WARN( "name %s not found\n", debugstr_w( name ) );
++    else TRACE( "name %s matched instance %s\n", debugstr_w( name ), debugstr_guid( guid ) );
++    return hr;
++}
++
+ void hid_joystick_cleanup_devices(void)
+ {
+     struct list *ptr;

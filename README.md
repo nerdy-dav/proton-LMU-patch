@@ -21,7 +21,7 @@ proton-cachyos, with the upstreamed patches dropped and the hotplug fix rewritte
 ## Quick start
 
 ```bash
-git clone <this-repo>
+git clone git@github.com:Pipodi/proton-LMU-patch.git
 cd proton-LMU-patch
 chmod +x build.sh
 ./build.sh cachyos          # or: ./build.sh   (GE, the default)

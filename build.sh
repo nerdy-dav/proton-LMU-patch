@@ -13,7 +13,7 @@
 # compat tool.
 #
 # Usage:
-#   ./build.sh                          # default variant + tag (ge GE-Proton11-3)
+#   ./build.sh                          # ge, newest GE-Proton tag on the remote
 #   ./build.sh ge GE-Proton11-3         # a specific GE tag
 #   ./build.sh cachyos                  # newest proton-cachyos release branch
 #   ./build.sh cachyos cachyos_11.0_20260713/main
@@ -26,13 +26,14 @@
 
 set -Eeuo pipefail
 
-VERSION="2.0"
+VERSION="2.1"
 GE_REPO="https://github.com/GloriousEggroll/proton-ge-custom.git"
-GE_DEFAULT_TAG="GE-Proton11-3"
+GE_DEFAULT_TAG="GE-Proton11-3"   # only used if the remote cannot be queried
 CACHY_REPO="https://github.com/CachyOS/proton-cachyos.git"
 CACHY_FALLBACK_BRANCH="cachyos_11.0_20260713/main"
 
-# The series was rebased onto this base's wine; anything else may need work.
+# Named in messages only. The commit each series was actually built against is
+# recorded in patches/wine/<series>/BASE and is what the rebase fallback uses.
 REBASE_BASE="GE-Proton11-3"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -99,10 +100,26 @@ newest_cachy_branch() {
         | sed 's|.*refs/heads/||' | sort -V | tail -1
 }
 
+# GE tags each release, so the default is the newest GE-Proton tag on the
+# remote. Release-candidate and other suffixed tags are skipped.
+newest_ge_tag() {
+    git ls-remote --tags --refs "$GE_REPO" 'GE-Proton*' 2>/dev/null \
+        | sed 's|.*refs/tags/||' | grep -E '^GE-Proton[0-9]+-[0-9]+$' \
+        | sort -V | tail -1
+}
+
 case "$VARIANT" in
     ge)
         REPO="$GE_REPO"
-        TAG="${TAG:-$GE_DEFAULT_TAG}"
+        if [[ -z "$TAG" ]]; then
+            TAG="$(newest_ge_tag || true)"
+            if [[ -n "$TAG" ]]; then
+                ok "newest proton-ge-custom release: $TAG"
+            else
+                TAG="$GE_DEFAULT_TAG"
+                warn "could not query the remote; falling back to $TAG"
+            fi
+        fi
         ;;
     cachyos)
         REPO="$CACHY_REPO"
@@ -283,6 +300,80 @@ count_series() {
     done
 }
 
+# Each series records the wine commit it was authored against in a BASE file.
+# When the base has moved on, we can replay the series there and let git rebase
+# do a real three-way merge instead of demanding the old context back.
+series_base() {
+    [[ -f "$PATCH_DIR/BASE" ]] || return 1
+    sed -n 's/^commit[[:space:]]\+//p' "$PATCH_DIR/BASE" | head -1
+}
+
+# Applying the series, easiest mechanism first:
+#   1. plain 'git am'            — exact context, the usual case
+#   2. 'git am -3'               — three-way where the pre-image blobs are around
+#   3. replay at BASE + rebase   — real merge against a base that has moved on
+# Anything left is a genuine conflict that wants a human.
+apply_series() {
+    local base head
+    head="$(git -C wine rev-parse HEAD)"
+
+    if git -C wine am "$PATCH_DIR"/*.patch 2>&1 | sed 's/^/      /'; then
+        ok "applied $lmu_total patches"
+        return
+    fi
+    git -C wine am --abort 2>/dev/null || true
+
+    warn "exact apply failed — the base has moved; trying a three-way merge"
+    if git -C wine am -3 "$PATCH_DIR"/*.patch 2>&1 | sed 's/^/      /'; then
+        ok "applied $lmu_total patches (three-way)"
+        warn "context drifted: re-export the series with 'git format-patch' and"
+        warn "update $(basename "$PATCH_DIR")/BASE so the next build takes the fast path"
+        return
+    fi
+    git -C wine am --abort 2>/dev/null || true
+
+    if ! base="$(series_base)" || [[ -z "$base" ]]; then
+        die "git am failed and $(basename "$PATCH_DIR")/BASE records no base commit to rebase from.
+     Rebase the series by hand and re-export it to ${PATCH_DIR#"$SCRIPT_DIR"/}."
+    fi
+
+    warn "three-way failed too — replaying the series at its recorded base and rebasing"
+    if ! git -C wine cat-file -e "${base}^{commit}" 2>/dev/null; then
+        echo "      fetching base commit $base"
+        git -C wine fetch --quiet origin "$base" 2>/dev/null \
+            || git -C wine fetch --quiet --tags origin 2>/dev/null || true
+    fi
+    git -C wine cat-file -e "${base}^{commit}" 2>/dev/null || die \
+        "base commit $base is not in the wine clone and could not be fetched.
+     It may have been garbage-collected upstream. Rebase the series by hand."
+
+    git -C wine checkout --quiet -B lmu-series "$base" \
+        || die "could not check out the recorded base $base"
+    git -C wine am "$PATCH_DIR"/*.patch >/dev/null 2>&1 || {
+        git -C wine am --abort 2>/dev/null || true
+        git -C wine checkout --quiet --detach "$head"
+        die "the series does not even apply to its own recorded base $base.
+     $(basename "$PATCH_DIR")/BASE is wrong, or the patches were edited by hand."
+    }
+
+    if git -C wine rebase --onto "$head" "$base" lmu-series 2>&1 | sed 's/^/      /'; then
+        git -C wine checkout --quiet --detach lmu-series
+        ok "rebased $lmu_total patches from $(git -C wine rev-parse --short "$base") onto $(git -C wine rev-parse --short "$head")"
+        warn "this build carries a rebased series that is NOT what is in ${PATCH_DIR#"$SCRIPT_DIR"/}."
+        warn "if it works, export it and update BASE:"
+        warn "  git -C $SRC/wine format-patch -$lmu_total --no-signature -o ${PATCH_DIR#"$SCRIPT_DIR"/}"
+        return
+    fi
+
+    git -C wine rebase --abort 2>/dev/null || true
+    git -C wine checkout --quiet --detach "$head"
+    die "the series conflicts with this base and needs a human. To do it by hand:
+       git -C $SRC/wine checkout -B lmu-series $base
+       git -C $SRC/wine am ${PATCH_DIR#"$SCRIPT_DIR"/}/*.patch
+       git -C $SRC/wine rebase --onto $head $base lmu-series
+     resolve, then re-export with 'git format-patch' and update BASE."
+}
+
 # CachyOS's build applies every patches/wine/*.patch in the source tree on top
 # of the rsynced copy. Ours are commits, so a stray copy there would be applied
 # a second time and fail the build.
@@ -302,11 +393,7 @@ else
      Reset it before retrying:
        git -C $SRC/wine am --abort 2>/dev/null; git -C $SRC/wine reset --hard @{upstream}"
     fi
-    git -C wine am "$PATCH_DIR"/*.patch \
-        || die "git am failed. The series is rebased onto ${REBASE_BASE}'s wine;
-     another tag — and proton-cachyos in particular, whose wine is Valve's
-     rather than GE's — will likely need the series rebased. Recover with:
-       git -C $SRC/wine am --abort"
+    apply_series
     count_series
     (( lmu_found == lmu_total )) || die "series applied but verification found only $lmu_found/$lmu_total"
     ok "applied $lmu_total patches"

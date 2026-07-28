@@ -1,0 +1,6 @@
+# The wine commit this series was authored against. build.sh uses it to rebase
+# the series automatically when the base moves on. Update it whenever you
+# regenerate the patches against a newer wine.
+repo   https://github.com/ValveSoftware/wine
+commit 9578fa3613f3379179b576968bc77c8161ab6ea8
+note   wine submodule of proton-ge-custom GE-Proton11-3

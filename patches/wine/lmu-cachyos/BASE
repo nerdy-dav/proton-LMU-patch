@@ -1,0 +1,6 @@
+# The wine commit this series was authored against. build.sh uses it to rebase
+# the series automatically when the base moves on. Update it whenever you
+# regenerate the patches against a newer wine.
+repo   https://github.com/CachyOS/wine-cachyos.git
+commit 1ba4fa168eb33b7008d6528d1a30da7555346355
+note   wine submodule of proton-cachyos cachyos_11.0_20260713/main

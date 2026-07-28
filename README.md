@@ -47,7 +47,7 @@ Two bases are supported: **`ge`** ([proton-ge-custom](https://github.com/Gloriou
 the default) and **`cachyos`** ([proton-cachyos](https://github.com/CachyOS/proton-cachyos)).
 
 ```bash
-./build.sh                            # default: ge GE-Proton11-3
+./build.sh                            # ge, newest GE-Proton tag on the remote
 ./build.sh ge GE-Proton11-3           # a specific GE tag
 ./build.sh cachyos                    # newest proton-cachyos release branch
 ./build.sh cachyos cachyos_11.0_20260713/main
@@ -56,8 +56,9 @@ the default) and **`cachyos`** ([proton-cachyos](https://github.com/CachyOS/prot
 ./build.sh -f ge master               # force a fresh re-clone
 ```
 
-CachyOS cuts a branch per release instead of tagging, so `cachyos` with no branch
-resolves the newest `cachyos_*/main` on the remote. `…/main` is the Steam Linux
+With no version given, both variants resolve the newest release live: the highest
+`GE-Proton<major>-<minor>` tag for `ge`, and — since CachyOS cuts a branch per
+release instead of tagging — the newest `cachyos_*/main` branch for `cachyos`. `…/main` is the Steam Linux
 Runtime flavour (folder suffix `-slr`), `…/main_native` the native one (`-native`).
 
 Other flags: `--skip-patch` (patch layer already applied), `--no-clean` (reuse the
@@ -132,11 +133,38 @@ tree: GE's prep script does `git reset --hard HEAD` (uncommitted work would be
 lost), and CachyOS rsyncs `wine/` minus `.git` into the build dir, so commits
 simply carry over.
 
-### Patch series per base
+### Keeping up with new releases
 
-Each series is rebased onto a specific wine. Another tag will very likely need a
-rebase first; `git am` stops and says so. Drop a rebased series into an override
-directory and the script picks it up automatically, most specific first:
+The series is authored against one specific wine commit, recorded in
+`patches/wine/<series>/BASE`. When a new GE tag or cachyos branch moves wine on,
+`build.sh` tries three things in order and only bothers you if all three fail:
+
+1. **`git am`** — exact context. Tolerant of hunks having shifted, so most
+   releases land here.
+2. **`git am -3`** — three-way merge. Rescues drift in the context *around* a
+   hunk, which plain `am` rejects.
+3. **replay at `BASE`, then `git rebase --onto` the new wine** — a full
+   three-way merge with every blob available. This is the one that survives
+   real churn, and it is what upstream reworking nearby code needs.
+
+If the rebase conflicts, upstream has changed the same lines the series changes
+and a human has to decide what the merged result should be. The script restores
+wine to where it was and prints the exact commands to redo the rebase by hand.
+
+When step 2 or 3 does the work, the build is carrying a series that is **not**
+what is checked in. Re-export it and update `BASE`:
+
+```bash
+git -C <version>-src/wine format-patch -<N> --no-signature -o patches/wine/<series>
+```
+
+Then commit the refreshed patches. A PR doing exactly that for a new base is the
+most useful contribution there is.
+
+### Overriding the series per base
+
+Each series is rebased onto a specific wine. Drop a rebased series into an
+override directory and the script picks it up automatically, most specific first:
 
 ```
 patches/wine/lmu-<version-id>/    e.g. lmu-proton-cachyos-11.0-20260713-slr/
@@ -223,9 +251,12 @@ Present on both bases, none of it caused by these patches:
 
 ## Troubleshooting
 
-**`git am` fails.** The series is rebased onto one specific wine revision; a
-different tag or branch needs it rebased. The error names the base it expects.
-Recover with `git -C <version>-src/wine am --abort`.
+**The series won't apply.** `build.sh` already tried an exact apply, a three-way
+merge and a rebase from the recorded `BASE` before giving up, so this means
+upstream changed the same lines the series changes. The error prints the commands
+to redo the rebase by hand; resolve the conflicts, re-export with
+`git format-patch` and update `BASE`. See
+[Keeping up with new releases](#keeping-up-with-new-releases).
 
 **The UI is garbled but the game runs.** Layers didn't apply — patches 0004–0006
 on GE, 0008–0011 on cachyos. Check they are in `git -C <version>-src/wine log`.

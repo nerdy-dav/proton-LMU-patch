@@ -169,9 +169,9 @@ here is exactly what is known, as of 2026-07-28:
 | series applies | 12/12, clean | 11/11, clean |
 | builds | yes (15m07s) | yes (14m32s) |
 | fixes present in shipped DLLs | yes | yes |
-| launches, loads onto track | **yes** | not tested yet |
-| in-game UI renders correctly | **yes** | not tested yet |
-| wheel reconnect mid-session | **yes** | not tested yet |
+| launches, loads onto track | **yes** | **yes** |
+| in-game UI renders correctly | **yes** | **yes** |
+| wheel reconnect mid-session | **yes** | **yes** |
 
 "Fixes present in shipped DLLs" means the built `d2d1.dll` contains
 `d2d_sprite_batch_create` and the Layers strings, and `dinput.dll` / `dinput8.dll`
@@ -179,8 +179,8 @@ here is exactly what is known, as of 2026-07-28:
 stub left. That proves the patches compiled into the package — not that they
 behave correctly.
 
-The cachyos hotplug verification is a `WINEDEBUG=+dinput` capture of a Simagic
-wheel unplugged and reconnected while on track:
+Both hotplug verifications are `WINEDEBUG=+dinput` captures of a Simagic wheel
+unplugged and reconnected while on track:
 
 ```
 hid_joystick_find_device ... matched instance {ae42ba3a-804c-11f1-8001-000044455354}
@@ -193,9 +193,33 @@ hid_joystick_send_force_feedback_command ... command 0x1
 Force feedback resumes, and `get_instance_from_guid ... not found` — the failure
 signature of the old stub — appears zero times in the whole log.
 
-GE ships the identical implementation, so it is expected to behave the same, but
-nobody has driven it yet. Reports welcome, especially from wheels other than a
-Simagic base: different hardware exercises different HID report descriptors.
+Both bases resolve the wheel to the *same* `guidInstance`, which is what patch
+0007/0005 is for — existing bindings survive a switch between the two tools.
+
+Neither log contains an unhandled exception, a `CreateSpriteBatch` fixme or any
+d2d1 error, and both shut down cleanly.
+
+Reports welcome, especially from wheels other than a Simagic base: different
+hardware exercises different HID report descriptors.
+
+### Known-benign log noise
+
+Present on both bases, none of it caused by these patches:
+
+- `warn:dinput:hid_joystick_find_device ... PID_0001&MI_00 ... not found`, once
+  per reconnect. LMU also asks about the wheelbase's second HID interface, which
+  is not a joystick and legitimately is not in the cache. `DIERR_DEVICENOTREG` is
+  the right answer and the game drops it. Under the old stub this returned
+  `DI_OK` with a garbage GUID.
+- `warn:dinput:dinput_device_init_user_format ... not found` — the game asks for
+  device objects this wheel does not have. Upstream behaviour.
+- `warn:dinput:hid_joystick_read HidP_GetUsagesEx returned 0xc0110004` on that
+  same secondary interface, and `fixme:dinput:hid_joystick_device_try_open device
+  usage ff00:0001 not implemented!` for its vendor-defined usage page.
+- One `err:sync:RtlpWaitForCriticalSection ... wait timed out` was seen in the GE
+  run, in the force-feedback effect-download path and well before the unplug. It
+  appeared once in 580k lines and the game recovered. Worth reporting if you see
+  it repeatedly or paired with a visible stall.
 
 ## Troubleshooting
 

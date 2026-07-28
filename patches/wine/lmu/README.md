@@ -91,19 +91,29 @@ patch.
 
 ## Status
 
-**Builds.** `./build.sh ge GE-Proton11-3` applies all 11 patches cleanly onto
-`9578fa3613f` and produces a complete tool tree and tarball. See the root
-[README Status](../../../README.md#status) for what has been run in-game.
+**Builds and runs.** `./build.sh ge GE-Proton11-3` applies all 11 patches cleanly
+onto `9578fa3613f` and produces a complete tool tree and tarball.
 
-The d2d1 conflict resolutions listed above are compile-level. The equivalent
-patches on the cachyos side are verified in-game (LMU loads onto the track, UI
-renders correctly), but GE's `d2d1` is a different tree, so a garbled UI here
-would mean 0004–0006 need another look rather than that the approach is wrong.
+**Verified in-game** on 2026-07-28: LMU launches, loads onto the track, the
+in-game UI renders correctly, and a Simagic wheel unplugged and reconnected
+mid-session is re-acquired with force feedback resuming:
 
-The hotplug fix in 0011 is verified in-game on cachyos (`../lmu-cachyos/README.md`
-has the log). GE ships the same implementation, and the shipped `dinput.dll` /
-`dinput8.dll` were checked to contain it, but the reconnect has not been exercised
-on a GE build. Re-check with:
+```
+dinput7_FindDevice       ... name L"\\?\HID#VID_3514&PID_000E#..."
+hid_joystick_find_device ... matched instance {ae42ba3a-804c-11f1-8001-000044455354}
+dinput8_a_CreateDevice   ... guid {ae42ba3a-804c-11f1-8001-000044455354}
+hid_joystick_device_try_open detected device type 0x10214
+dinput_device_Acquire
+```
+
+`get_instance_from_guid ... not found` — the failure signature of the old stub —
+appears zero times in a 580k-line log, and the instance GUID matches the one the
+cachyos build derives for the same hardware, so bindings survive switching tools.
+
+See the root [README Status](../../../README.md#status) for both bases side by
+side and the list of known-benign log noise.
+
+Re-check after any rebase with:
 
 ```
 WINEDEBUG=+dinput PROTON_LOG=1 %command%

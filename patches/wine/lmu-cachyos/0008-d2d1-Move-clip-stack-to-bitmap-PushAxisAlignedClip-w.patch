@@ -1,0 +1,213 @@
+From ea1878179129ffcade821944b4d4169ef5a8889a Mon Sep 17 00:00:00 2001
+From: Oleg Makarenko <oleg@makarenk.ooo>
+Date: Sat, 27 Sep 2025 20:36:27 +0300
+Subject: [PATCH 08/11] d2d1: Move clip stack to bitmap PushAxisAlignedClip was
+ preserved across different targets. That's an error. Moved clip_stack onto
+ bitmap.
+
+---
+ dlls/d2d1/bitmap.c       | 25 ++++++++++++++++++++
+ dlls/d2d1/d2d1_private.h |  3 ++-
+ dlls/d2d1/device.c       | 50 +++++++++++++++++++++++++++++-----------
+ 3 files changed, 64 insertions(+), 14 deletions(-)
+
+diff --git a/dlls/d2d1/bitmap.c b/dlls/d2d1/bitmap.c
+index c6ab60c1bc4..0de8614509b 100644
+--- a/dlls/d2d1/bitmap.c
++++ b/dlls/d2d1/bitmap.c
+@@ -21,11 +21,30 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(d2d);
+ 
++#define INITIAL_CLIP_STACK_SIZE 4
++
+ static inline struct d2d_bitmap *impl_from_ID2D1Bitmap1(ID2D1Bitmap1 *iface)
+ {
+     return CONTAINING_RECORD(iface, struct d2d_bitmap, ID2D1Bitmap1_iface);
+ }
+ 
++static BOOL d2d_clip_stack_init(struct d2d_clip_stack *stack)
++{
++    if (!(stack->stack = malloc(INITIAL_CLIP_STACK_SIZE * sizeof(*stack->stack))))
++        return FALSE;
++
++    stack->size = INITIAL_CLIP_STACK_SIZE;
++    stack->count = 0;
++
++    return TRUE;
++}
++
++static void d2d_clip_stack_cleanup(struct d2d_clip_stack *stack)
++{
++    free(stack->stack);
++}
++
++
+ static HRESULT d2d_bitmap_unmap(struct d2d_bitmap *bitmap)
+ {
+     ID3D11DeviceContext *context;
+@@ -85,6 +104,8 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_Release(ID2D1Bitmap1 *iface)
+ 
+     if (!refcount)
+     {
++        d2d_clip_stack_cleanup(&bitmap->clip_stack);
++
+         if (bitmap->srv)
+             ID3D11ShaderResourceView_Release(bitmap->srv);
+         if (bitmap->rtv)
+@@ -430,6 +451,10 @@ static void d2d_bitmap_init(struct d2d_bitmap *bitmap, struct d2d_device_context
+         bitmap->dpi_x = 96.0f;
+         bitmap->dpi_y = 96.0f;
+     }
++    if (!d2d_clip_stack_init(&bitmap->clip_stack))
++    {
++        WARN("Failed to initialize clip stack.\n");
++    }
+ }
+ 
+ static BOOL check_bitmap_options(unsigned int options)
+diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
+index d4de0512876..0e04c99552c 100644
+--- a/dlls/d2d1/d2d1_private.h
++++ b/dlls/d2d1/d2d1_private.h
+@@ -218,7 +218,7 @@ struct d2d_device_context
+ 
+     D2D1_RENDER_TARGET_PROPERTIES desc;
+     D2D1_SIZE_U pixel_size;
+-    struct d2d_clip_stack clip_stack;
++
+ 
+     struct d2d_indexed_objects vertex_buffers;
+ };
+@@ -450,6 +450,7 @@ struct d2d_bitmap
+     float dpi_y;
+     D2D1_BITMAP_OPTIONS options;
+ 
++    struct d2d_clip_stack clip_stack;
+     BOOL is_tinted;
+     D2D1_COLOR_F tint_colour;
+ };
+diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
+index 27b12024456..35eddb1e6f7 100644
+--- a/dlls/d2d1/device.c
++++ b/dlls/d2d1/device.c
+@@ -21,7 +21,7 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(d2d);
+ 
+-#define INITIAL_CLIP_STACK_SIZE 4
++
+ 
+ static const D2D1_MATRIX_3X2_F identity =
+ {{{
+@@ -116,6 +116,15 @@ static void d2d_clip_stack_pop(struct d2d_clip_stack *stack)
+     --stack->count;
+ }
+ 
++static struct d2d_clip_stack* d2d_return_target_clip_stack(struct d2d_device_context *context) {
++    if (context->target.type != D2D_TARGET_BITMAP) {
++        ERR("Clip Stack is only on BITMAP target\n");
++        return NULL;
++    }
++    return &context->target.bitmap->clip_stack;
++}
++
++
+ static void d2d_device_context_draw(struct d2d_device_context *render_target, enum d2d_shape_type shape_type,
+         ID3D11Buffer *ib, unsigned int index_count, ID3D11Buffer *vb, unsigned int vb_stride,
+         struct d2d_brush *brush, struct d2d_brush *opacity_brush)
+@@ -152,11 +161,15 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
+     ID3D11DeviceContext1_PSSetConstantBuffers(context, 0, 1, &ps_cb);
+     ID3D11DeviceContext1_PSSetShader(context, render_target->ps, NULL, 0);
+     ID3D11DeviceContext1_RSSetViewports(context, 1, &vp);
+-    if (render_target->clip_stack.count)
++
++    struct d2d_clip_stack* clip_stack;
++    clip_stack = d2d_return_target_clip_stack(render_target);
++    if (clip_stack && clip_stack->count)
+     {
++        TRACE("Draw - active clip!\n");
+         const D2D1_RECT_F *clip_rect;
+ 
+-        clip_rect = &render_target->clip_stack.stack[render_target->clip_stack.count - 1];
++        clip_rect = &clip_stack->stack[clip_stack->count - 1];
+         scissor_rect.left = ceilf(clip_rect->left - 0.5f);
+         scissor_rect.top = ceilf(clip_rect->top - 0.5f);
+         scissor_rect.right = ceilf(clip_rect->right - 0.5f);
+@@ -164,11 +177,15 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
+     }
+     else
+     {
++        TRACE("Draw - no active clip!\n");
+         scissor_rect.left = 0.0f;
+         scissor_rect.top = 0.0f;
+         scissor_rect.right = render_target->pixel_size.width;
+         scissor_rect.bottom = render_target->pixel_size.height;
+     }
++
++    TRACE("%ld,%ld %ld,%ld\n",scissor_rect.left,scissor_rect.top,scissor_rect.right,scissor_rect.bottom);
++
+     ID3D11DeviceContext1_RSSetScissorRects(context, 1, &scissor_rect);
+     ID3D11DeviceContext1_RSSetState(context, render_target->rs);
+     ID3D11DeviceContext1_OMSetRenderTargets(context, 1, &render_target->target.bitmap->rtv, NULL);
+@@ -1936,8 +1953,15 @@ static void STDMETHODCALLTYPE d2d_device_context_PushAxisAlignedClip(ID2D1Device
+ 
+     TRACE("iface %p, clip_rect %s, antialias_mode %#x.\n", iface, debug_d2d_rect_f(clip_rect), antialias_mode);
+ 
+-    if (context->target.type == D2D_TARGET_COMMAND_LIST)
++    if (context->target.type == D2D_TARGET_COMMAND_LIST) {
+         d2d_command_list_push_clip(context->target.command_list, clip_rect, antialias_mode);
++        return;
++    }
++
++    if (context->target.type != D2D_TARGET_BITMAP) {
++        ERR("PushAxisAlignedClip supports only BITMAP target\n");
++        return;
++    }
+ 
+     if (antialias_mode != D2D1_ANTIALIAS_MODE_ALIASED)
+         FIXME("Ignoring antialias_mode %#x.\n", antialias_mode);
+@@ -1957,7 +1981,7 @@ static void STDMETHODCALLTYPE d2d_device_context_PushAxisAlignedClip(ID2D1Device
+             clip_rect->right * x_scale, clip_rect->bottom * y_scale);
+     d2d_rect_expand(&transformed_rect, &point);
+ 
+-    if (!d2d_clip_stack_push(&context->clip_stack, &transformed_rect))
++    if (!d2d_clip_stack_push(d2d_return_target_clip_stack(context), &transformed_rect))
+         WARN("Failed to push clip rect.\n");
+ }
+ 
+@@ -1967,10 +1991,16 @@ static void STDMETHODCALLTYPE d2d_device_context_PopAxisAlignedClip(ID2D1DeviceC
+ 
+     TRACE("iface %p.\n", iface);
+ 
+-    if (context->target.type == D2D_TARGET_COMMAND_LIST)
++    if (context->target.type == D2D_TARGET_COMMAND_LIST) {
+         d2d_command_list_pop_clip(context->target.command_list);
++        return;
++    }
++    if (context->target.type != D2D_TARGET_BITMAP) {
++        ERR("PopAxisAlignedClip supports only BITMAP target\n");
++        return;
++    }
+ 
+-    d2d_clip_stack_pop(&context->clip_stack);
++    d2d_clip_stack_pop(d2d_return_target_clip_stack(context));
+ }
+ 
+ static void STDMETHODCALLTYPE d2d_device_context_Clear(ID2D1DeviceContext6 *iface, const D2D1_COLOR_F *colour)
+@@ -4446,12 +4476,6 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+ 
+     render_target->drawing_state.transform = identity;
+ 
+-    if (!d2d_clip_stack_init(&render_target->clip_stack))
+-    {
+-        WARN("Failed to initialize clip stack.\n");
+-        hr = E_FAIL;
+-        goto err;
+-    }
+ 
+     render_target->desc.dpiX = 96.0f;
+     render_target->desc.dpiY = 96.0f;
+-- 
+2.55.0
+

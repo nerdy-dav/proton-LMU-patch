@@ -1,0 +1,93 @@
+From e3076104d55cc1f531c20ae24456bf45c541a814 Mon Sep 17 00:00:00 2001
+From: Oleg Makarenko <oleg@makarenk.ooo>
+Date: Sat, 27 Sep 2025 20:17:06 +0300
+Subject: [PATCH 03/11] d2d1: Add Tint effect stub
+
+---
+ dlls/d2d1/effect.c        | 32 +++++++++++++++++++++++++++++++-
+ include/d2d1effects_2.idl |  8 ++++++++
+ 2 files changed, 39 insertions(+), 1 deletion(-)
+
+diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
+index 286fae95e9c..e7db989243f 100644
+--- a/dlls/d2d1/effect.c
++++ b/dlls/d2d1/effect.c
+@@ -1804,6 +1804,26 @@ static HRESULT __stdcall scale_factory(IUnknown **effect)
+     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
+ 
++
++static const WCHAR tint_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Tint'/>             \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Tint'/>             \
++    <Inputs >                                                             \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='Color'       type='vector4' />                        \
++    <Property name='ClampOutput' type='bool' />                           \
++  </Effect>";
++
++static HRESULT __stdcall tint_factory(IUnknown **effect)
++{
++    return d2d_effect_create_impl(effect, NULL, 0);
++}
++
+ void d2d_effects_init_builtins(struct d2d_factory *factory)
+ {
+     static const struct builtin_description
+@@ -1835,6 +1855,7 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+         { &CLSID_D2D1HueRotation, X2(hue_rotation) },
+         { &CLSID_D2D1Saturation, X2(saturation) },
+         { &CLSID_D2D1Scale, X2(scale) },
++        { &CLSID_D2D1Tint, X(tint) },
+ #undef X2
+ #undef X
+     };
+@@ -3490,7 +3511,16 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+ 
+     *effect = &object->ID2D1Effect_iface;
+ 
+-    TRACE("Created effect %p.\n", *effect);
++    object->effect_id = *effect_id;
++    TRACE("Created effect %s %p.\n", wine_dbgstr_guid(effect_id), *effect);
+ 
+     return S_OK;
+ }
++
++struct d2d_effect *unsafe_impl_from_ID2D1Effect(ID2D1Effect *iface)
++{
++    if (!iface)
++        return NULL;
++    assert(iface->lpVtbl == (ID2D1EffectVtbl *)&d2d_effect_vtbl);
++    return CONTAINING_RECORD(iface, struct d2d_effect, ID2D1Effect_iface);
++}
+diff --git a/include/d2d1effects_2.idl b/include/d2d1effects_2.idl
+index 9cd93a8d3bf..526e29c8ce4 100644
+--- a/include/d2d1effects_2.idl
++++ b/include/d2d1effects_2.idl
+@@ -20,6 +20,7 @@ import "d2d1effects_1.idl";
+ 
+ cpp_quote("DEFINE_GUID(CLSID_D2D1Grayscale,         0x36dde0eb,0x3725,0x42e0,0x83,0x6d,0x52,0xfb,0x20,0xae,0xe6,0x44);")
+ cpp_quote("DEFINE_GUID(CLSID_D2D1HighlightsShadows, 0xcadc8384,0x323f,0x4c7e,0xa3,0x61,0x2e,0x2b,0x24,0xdf,0x6e,0xe4);")
++cpp_quote("DEFINE_GUID(CLSID_D2D1Tint,              0x36312b17,0xf7dd,0x4014,0x91,0x5d,0xff,0xca,0x76,0x8c,0xf2,0x11);")
+ 
+ typedef enum D2D1_HIGHLIGHTSANDSHADOWS_PROP
+ {
+@@ -37,3 +38,10 @@ typedef enum D2D1_HIGHLIGHTSANDSHADOWS_INPUT_GAMMA
+     D2D1_HIGHLIGHTSANDSHADOWS_INPUT_GAMMA_SRGB   = 0x1,
+     D2D1_HIGHLIGHTSANDSHADOWS_INPUT_GAMMA_FORCE_DWORD = 0xffffffff
+ } D2D1_HIGHLIGHTSANDSHADOWS_INPUT_GAMMA;
++
++typedef enum D2D1_TINT_PROP
++{
++    D2D1_TINT_PROP_COLOR = 0x0,
++    D2D1_TINT_PROP_CLAMP_OUTPUT   = 0x1,
++    D2D1_TINT_PROP_FORCE_DWORD = 0xffffffff
++} D2D1_TINT_PROP;
+-- 
+2.55.0
+

@@ -1,0 +1,42 @@
+From e27c7f29b85625c16597af871dc830916f44b898 Mon Sep 17 00:00:00 2001
+From: pipodi <pipodi93@gmail.com>
+Date: Tue, 28 Jul 2026 15:00:42 +0200
+Subject: [PATCH 01/11] d2d1: Add the tint and effect_id fields the LMU series
+ uses
+
+struct d2d_bitmap gains is_tinted/tint_colour and struct d2d_effect gains
+effect_id. Upstream these are declared by the Tint-rendering HACK, which this
+series does not carry, but the SpriteBatch and Tint-stub patches write to them.
+
+Bitmaps are calloc'd, so is_tinted defaults to FALSE and nothing reads either
+field before writing it.
+---
+ dlls/d2d1/d2d1_private.h | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
+index 9c78aaf92e2..ac01d30e720 100644
+--- a/dlls/d2d1/d2d1_private.h
++++ b/dlls/d2d1/d2d1_private.h
+@@ -449,6 +449,9 @@ struct d2d_bitmap
+     float dpi_x;
+     float dpi_y;
+     D2D1_BITMAP_OPTIONS options;
++
++    BOOL is_tinted;
++    D2D1_COLOR_F tint_colour;
+ };
+ 
+ HRESULT d2d_bitmap_create(struct d2d_device_context *context, D2D1_SIZE_U size, const void *src_data,
+@@ -843,6 +846,8 @@ struct d2d_effect
+     ID2D1Image **inputs;
+     size_t inputs_size;
+     size_t input_count;
++
++    CLSID effect_id;
+ };
+ 
+ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
+-- 
+2.55.0
+

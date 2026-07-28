@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pipodi <pipodi93@gmail.com>
+Date: Sun, 26 Jul 2026 15:30:00 +0200
+Subject: [PATCH 11/11] dinput: Look up FindDevice by name instead of by path
+
+The implementation added in 0009 passes the caller-supplied device *name*
+straight into hid_joystick_device_try_open(), which treats its first argument
+as a device path and CreateFileW()s it. For any real DirectInput caller --
+which passes an instance name such as L"CONSPIT 300GT", not a \\?\hid#...
+path -- that open always fails, so FindDevice returns the failure and the
+application never receives an instance GUID. Hotplugging a wheel while the
+game is running therefore leaves the device unusable, which is the exact case
+0009 was meant to fix.
+
+Search the joystick cache by instance/product name instead, refreshing it
+first so devices plugged in since the last enumeration are visible. This
+mirrors hid_joystick_enum_device() and the DIERR_DEVICENOTREG retry in
+dinput7_CreateDeviceEx().
+
+Also correct the out parameter from GUID** to GUID*. The caller passed
+&instance_guid (a GUID**) to a GUID** parameter that was then dereferenced
+twice, which happened to work only because the extra indirection cancelled
+out; with a NULL check now in place the signature needs to be honest.
+
+diff --git a/dlls/dinput/dinput.c b/dlls/dinput/dinput.c
+index 13ffe7b6222..da2df4cf318 100644
+--- a/dlls/dinput/dinput.c
++++ b/dlls/dinput/dinput.c
+@@ -259,16 +259,15 @@ static HRESULT WINAPI dinput7_RunControlPanel( IDirectInput7W *iface, HWND owner
+ 
+ static HRESULT WINAPI dinput7_FindDevice( IDirectInput7W *iface, const GUID *guid, const WCHAR *name, GUID *instance_guid )
+ {
+-    HRESULT hr;
+     struct dinput *impl = impl_from_IDirectInput7W( iface );
+ 
+-    FIXME( "iface %p, guid %s, name %s, instance_guid %s stub!\n", iface, debugstr_guid( guid ),
+-           debugstr_w(name), debugstr_guid( instance_guid ) );
++    TRACE( "iface %p, guid %s, name %s, instance_guid %p.\n", iface, debugstr_guid( guid ),
++           debugstr_w(name), instance_guid );
+ 
+-    hr = hid_joystick_find_device( impl, guid, name, &instance_guid );
+-    TRACE( "find_device returns %#lx\n ", hr);
+-    TRACE( "instance_guid is %s\n ", debugstr_guid( instance_guid ));
+-    return hr;
++    if (!instance_guid) return E_POINTER;
++    if (!impl->dwVersion) return DIERR_NOTINITIALIZED;
++
++    return hid_joystick_find_device( impl, guid, name, instance_guid );
+ }
+ 
+ static HRESULT WINAPI dinput7_CreateDeviceEx( IDirectInput7W *iface, const GUID *guid,
+diff --git a/dlls/dinput/dinput_private.h b/dlls/dinput/dinput_private.h
+index 7ad9fd41598..5589a41b01d 100644
+--- a/dlls/dinput/dinput_private.h
++++ b/dlls/dinput/dinput_private.h
+@@ -59,7 +59,7 @@ extern HRESULT hid_joystick_enum_device( DWORD type, DWORD flags, DIDEVICEINSTAN
+ extern HRESULT hid_joystick_create_device( struct dinput *dinput, const GUID *guid, IDirectInputDevice8W **out );
+ extern HRESULT hid_joystick_refresh_devices(void);
+ extern void hid_joystick_cleanup_devices(void);
+-extern HRESULT hid_joystick_find_device( struct dinput *dinput, const GUID *rguidClass, const WCHAR * ptszname, GUID **out );
++extern HRESULT hid_joystick_find_device( struct dinput *dinput, const GUID *rguidClass, const WCHAR *ptszname, GUID *out );
+ 
+ 
+ struct DevicePlayer {
+diff --git a/dlls/dinput/joystick_hid.c b/dlls/dinput/joystick_hid.c
+index 4df692d5ab5..ed19f2a694a 100644
+--- a/dlls/dinput/joystick_hid.c
++++ b/dlls/dinput/joystick_hid.c
+@@ -1996,23 +1996,38 @@ HRESULT hid_joystick_refresh_devices(void)
+ }
+ 
+ 
+-HRESULT hid_joystick_find_device( struct dinput *dinput, const GUID *rguidClass, const WCHAR * ptszname, GUID **out ) {
+-
+-    HIDD_ATTRIBUTES attrs = {.Size = sizeof(attrs)};
+-    PHIDP_PREPARSED_DATA preparsed;
+-    HIDP_CAPS caps;
+-    HANDLE device;
++HRESULT hid_joystick_find_device( struct dinput *dinput, const GUID *rguidClass, const WCHAR *ptszname, GUID *out )
++{
++    struct cache_entry *entry;
+     HRESULT hr;
+-    DIDEVICEINSTANCEW instance = {.dwSize = sizeof(DIDEVICEINSTANCEW)};
+ 
+-    hr = hid_joystick_device_try_open( ptszname, &device, &preparsed,
+-                                    &attrs, &caps, &instance, dinput->dwVersion );
+-    TRACE("try_open result: %#lx; guid is %s", hr, debugstr_guid( &instance.guidInstance ));
+-    if (hr == S_OK) {
+-        **out = instance.guidInstance;
+-        CloseHandle( device );
+-        HidD_FreePreparsedData( preparsed );
++    TRACE( "dinput %p, rguidClass %s, ptszname %s\n", dinput, debugstr_guid( rguidClass ), debugstr_w( ptszname ) );
++
++    if (!ptszname || !out) return E_POINTER;
++
++    /* The device may have been hotplugged since the last enumeration, so rebuild
++     * the cache before looking in it. */
++    if (FAILED(hr = hid_joystick_refresh_devices())) return hr;
++
++    hr = DIERR_DEVICENOTREG;
++
++    EnterCriticalSection( &joystick_cache_cs );
++
++    LIST_FOR_EACH_ENTRY( entry, &joystick_cache, struct cache_entry, entry )
++    {
++        if (!*entry->path) continue;
++        if (wcsicmp( entry->instance.tszInstanceName, ptszname ) &&
++            wcsicmp( entry->instance.tszProductName, ptszname )) continue;
++
++        *out = entry->instance.guidInstance;
++        hr = DI_OK;
++        break;
+     }
++
++    LeaveCriticalSection( &joystick_cache_cs );
++
++    if (FAILED(hr)) WARN( "device %s not found\n", debugstr_w( ptszname ) );
++    else TRACE( "found %s -> %s\n", debugstr_w( ptszname ), debugstr_guid( out ) );
+     return hr;
+ }
+ 
+-- 
+2.51.0
+

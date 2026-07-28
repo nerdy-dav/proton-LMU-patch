@@ -1,0 +1,34 @@
+From baea7dfc353b4a0de0d6a2873e43cca25064ee32 Mon Sep 17 00:00:00 2001
+From: pipodi <pipodi93@gmail.com>
+Date: Tue, 28 Jul 2026 14:30:01 +0200
+Subject: [PATCH 06/11] dinput: Fix build - cast RtlComputeCrc32 arguments to
+ const BYTE *
+
+---
+ dlls/dinput/joystick_hid.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/dinput/joystick_hid.c b/dlls/dinput/joystick_hid.c
+index e470f4a1b14..58f56ad4ed2 100644
+--- a/dlls/dinput/joystick_hid.c
++++ b/dlls/dinput/joystick_hid.c
+@@ -1810,13 +1810,13 @@ static HRESULT hid_joystick_device_try_open( WCHAR *path, HANDLE *device, PHIDP_
+     instance->dwSize = sizeof(DIDEVICEINSTANCEW);
+     instance->guidInstance = hid_joystick_guid;
+     DWORD crc = 0;
+-    crc = RtlComputeCrc32(crc, instance->tszInstanceName, wcslen(instance->tszInstanceName) * sizeof(WCHAR));
+-    crc = RtlComputeCrc32(crc, instance->tszProductName, wcslen(instance->tszProductName) * sizeof(WCHAR));
++    crc = RtlComputeCrc32(crc, (const BYTE *)instance->tszInstanceName, wcslen(instance->tszInstanceName) * sizeof(WCHAR));
++    crc = RtlComputeCrc32(crc, (const BYTE *)instance->tszProductName, wcslen(instance->tszProductName) * sizeof(WCHAR));
+     WCHAR serial[MAX_PATH];
+     memset(serial, 0, sizeof(serial));
+ 
+     if (HidD_GetSerialNumberString( device_file, serial, MAX_PATH * sizeof(WCHAR) )) {
+-        crc = RtlComputeCrc32(crc, serial, wcslen(serial) * sizeof(WCHAR));
++        crc = RtlComputeCrc32(crc, (const BYTE *)serial, wcslen(serial) * sizeof(WCHAR));
+     } else {
+         WARN("Couldn't get serial number\n");
+     }
+-- 
+2.55.0
+

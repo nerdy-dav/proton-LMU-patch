@@ -1,0 +1,162 @@
+From 457da4f73efd546b5db522a031fe0aa35abc2e48 Mon Sep 17 00:00:00 2001
+From: pipodi <pipodi93@gmail.com>
+Date: Tue, 28 Jul 2026 14:31:28 +0200
+Subject: [PATCH 07/11] Fix warnings treated as errors
+
+Hoist declarations in the SpriteBatch code and in hid_joystick_device_try_open
+so they compile with -Werror=declaration-after-statement.
+
+Subset of the original 0010 covering only the code this series carries: the
+device.c hunks for Layers/DrawImage and the dinput.c hunk for FindDevice belong
+to patches that are not part of the CachyOS series.
+---
+ dlls/d2d1/device.c         | 23 +++++++++++++++--------
+ dlls/d2d1/sprite_batch.c   | 26 +++++++++++++-------------
+ dlls/dinput/joystick_hid.c |  5 +++--
+ 3 files changed, 31 insertions(+), 23 deletions(-)
+
+diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
+index 72cfb57bba2..27b12024456 100644
+--- a/dlls/d2d1/device.c
++++ b/dlls/d2d1/device.c
+@@ -3046,12 +3046,14 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateTransformedImageSource
+ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateSpriteBatch(ID2D1DeviceContext6 *iface,
+         ID2D1SpriteBatch **sprite_batch)
+ {
+-    TRACE("iface %p, sprite_batch %p\n", iface, sprite_batch);
+ 
+     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+     struct d2d_sprite_batch *object;
+     HRESULT hr;
+ 
++    TRACE("iface %p, sprite_batch %p\n", iface, sprite_batch);
++    
++    
+     if (SUCCEEDED(hr = d2d_sprite_batch_create(context->factory, &object)))
+         *sprite_batch = &object->ID2D1SpriteBatch_iface;
+ 
+@@ -3062,12 +3064,19 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSpriteBatch(ID2D1DeviceCont
+         ID2D1SpriteBatch *sprite_batch, UINT32 start_index, UINT32 sprite_count, ID2D1Bitmap *bitmap,
+         D2D1_BITMAP_INTERPOLATION_MODE interpolation_mode, D2D1_SPRITE_OPTIONS sprite_options)
+ {
++    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
++    struct d2d_sprite_batch *batch = unsafe_impl_from_ID2D1SpriteBatch(sprite_batch);
++
++    D2D1_ANTIALIAS_MODE old_mode;
++    D2D1_RECT_F dst;
++    D2D1_MATRIX_3X2_F prev_tr;
++    D2D1_RECT_F src_rect_f;
++
++
++
+     TRACE("iface %p, sprite_batch %p, start_index %u, sprite_count %u, bitmap %p, interpolation_mode %u,"
+             "sprite_options %u\n", iface, sprite_batch, start_index, sprite_count, bitmap,
+             interpolation_mode, sprite_options);
+-    
+-    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+-    struct d2d_sprite_batch *batch = unsafe_impl_from_ID2D1SpriteBatch(sprite_batch);
+     TRACE("context %p, batch %p\n", context, batch);
+     
+     if (!batch || !bitmap) return;
+@@ -3082,7 +3091,7 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSpriteBatch(ID2D1DeviceCont
+ 
+     TRACE("Drawing %u sprites from batch.\n", sprite_count);
+ 
+-    D2D1_ANTIALIAS_MODE old_mode = d2d_device_context_GetAntialiasMode(iface);
++    old_mode = d2d_device_context_GetAntialiasMode(iface);
+     TRACE("Antialiased mode now: %#x\n", old_mode);
+     d2d_device_context_SetAntialiasMode(iface, D2D1_ANTIALIAS_MODE_ALIASED);
+     /* Iterate over the sprites */
+@@ -3094,14 +3103,12 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSpriteBatch(ID2D1DeviceCont
+         // For now ignore interpolation mode or other sprite options.
+ 
+         // Not so efficient, because we always clip from InfiniteMatrix and transform our rect from identity.
+-        D2D1_RECT_F dst = batch->sprites[i].destinationRect;
++        dst = batch->sprites[i].destinationRect;
+ 
+ 
+-        D2D1_MATRIX_3X2_F prev_tr;
+         d2d_device_context_GetTransform(iface,&prev_tr);
+         d2d_device_context_SetTransform(iface, &batch->sprites[i].transform);
+ 
+-        D2D1_RECT_F src_rect_f;
+         src_rect_f.left   = (FLOAT)batch->sprites[i].sourceRect.left;
+         src_rect_f.top    = (FLOAT)batch->sprites[i].sourceRect.top;
+         src_rect_f.right  = (FLOAT)batch->sprites[i].sourceRect.right;
+diff --git a/dlls/d2d1/sprite_batch.c b/dlls/d2d1/sprite_batch.c
+index 4e8dc97acb1..42163c137f9 100644
+--- a/dlls/d2d1/sprite_batch.c
++++ b/dlls/d2d1/sprite_batch.c
+@@ -90,6 +90,17 @@ static HRESULT STDMETHODCALLTYPE d2d_sprite_batch_AddSprites(ID2D1SpriteBatch *i
+             UINT32 transformsStride)
+ {
+     struct d2d_sprite_batch *batch = impl_from_ID2D1SpriteBatch(iface);
++    UINT32 new_sprite_count = 0;
++    struct d2d_sprite* new_sprites;
++
++    D2D1_RECT_U inf = {0,0,UINT_MAX,UINT_MAX};
++    D2D1_COLOR_F color1={1.0f,1.0f,1.0f,1.0f};
++    D2D1_MATRIX_3X2_F identity =
++                                {{{
++                                    1.0f, 0.0f,
++                                    0.0f, 1.0f,
++                                    0.0f, 0.0f,
++                                }}};
+ 
+     TRACE("iface %p, batch %p, spriteCount %d, d %p, s %p, c %p, t %p, %d, %d, %d, %d\n", iface, batch, spriteCount, destinationRects, \
+             sourceRects, colors, transforms, destinationRectanglesStride, sourceRectanglesStride, colorsStride, transformsStride);
+@@ -100,24 +111,13 @@ static HRESULT STDMETHODCALLTYPE d2d_sprite_batch_AddSprites(ID2D1SpriteBatch *i
+     }
+ 
+     /* Expand storage if needed */
+-    UINT32 new_sprite_count = batch->sprite_count + spriteCount;
++    new_sprite_count = batch->sprite_count + spriteCount;
+     
+-    struct d2d_sprite* new_sprites = realloc(batch->sprites, new_sprite_count*sizeof(struct d2d_sprite));
++    new_sprites = realloc(batch->sprites, new_sprite_count*sizeof(struct d2d_sprite));
+     if (!new_sprites)
+         return E_OUTOFMEMORY;
+     batch->sprites = new_sprites;
+     
+-    // "Zero" new sprite
+-    D2D1_RECT_U inf = {0,0,UINT_MAX,UINT_MAX};
+-
+-    D2D1_COLOR_F color1={1.0f,1.0f,1.0f,1.0f};
+-    D2D1_MATRIX_3X2_F identity =
+-                                {{{
+-                                    1.0f, 0.0f,
+-                                    0.0f, 1.0f,
+-                                    0.0f, 0.0f,
+-                                }}};
+-                                
+     /* Not efficient in memory, but most simple approach for now */
+     for (UINT32 i = batch->sprite_count; i < new_sprite_count; i++) {
+ 
+diff --git a/dlls/dinput/joystick_hid.c b/dlls/dinput/joystick_hid.c
+index 58f56ad4ed2..42f034f856e 100644
+--- a/dlls/dinput/joystick_hid.c
++++ b/dlls/dinput/joystick_hid.c
+@@ -1773,6 +1773,9 @@ static HRESULT hid_joystick_device_try_open( WCHAR *path, HANDLE *device, PHIDP_
+     NTSTATUS status;
+     BOOL override;
+     USHORT count;
++    DWORD crc = 0;
++    WCHAR serial[MAX_PATH];
++
+ 
+     device_file = CreateFileW( path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING, 0 );
+@@ -1809,10 +1812,8 @@ static HRESULT hid_joystick_device_try_open( WCHAR *path, HANDLE *device, PHIDP_
+ 
+     instance->dwSize = sizeof(DIDEVICEINSTANCEW);
+     instance->guidInstance = hid_joystick_guid;
+-    DWORD crc = 0;
+     crc = RtlComputeCrc32(crc, (const BYTE *)instance->tszInstanceName, wcslen(instance->tszInstanceName) * sizeof(WCHAR));
+     crc = RtlComputeCrc32(crc, (const BYTE *)instance->tszProductName, wcslen(instance->tszProductName) * sizeof(WCHAR));
+-    WCHAR serial[MAX_PATH];
+     memset(serial, 0, sizeof(serial));
+ 
+     if (HidD_GetSerialNumberString( device_file, serial, MAX_PATH * sizeof(WCHAR) )) {
+-- 
+2.55.0
+

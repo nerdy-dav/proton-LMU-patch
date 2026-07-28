@@ -1,0 +1,6 @@
+# Per-version source and build trees, created by build.sh (tens of GB each).
+/*-src/
+/*-build/
+
+# Build logs.
+/logs/

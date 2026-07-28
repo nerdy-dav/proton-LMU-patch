@@ -1,0 +1,30 @@
+From 4a7e9c7d4cffeb7a411e7e22ed0186c8affa70e2 Mon Sep 17 00:00:00 2001
+From: Oleg Makarenko <oleg@makarenk.ooo>
+Date: Sat, 27 Sep 2025 20:27:37 +0300
+Subject: [PATCH 04/11] d2d1: Add debug_d2d_matrix3x2_f function
+
+---
+ dlls/d2d1/d2d1_private.h | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
+index 86b65ac6892..d4de0512876 100644
+--- a/dlls/d2d1/d2d1_private.h
++++ b/dlls/d2d1/d2d1_private.h
+@@ -1120,4 +1120,13 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+             ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
+ }
+ 
++static inline const char *debug_d2d_matrix3x2_f(const D2D1_MATRIX_3X2_F *matrix)
++{
++    if (!matrix)
++        return "(null)";
++    return wine_dbg_sprintf("(%.4e, %.4e)-(%.4e, %.4e)-(%.4e, %.4e)", matrix->_11, matrix->_12, 
++                                                                    matrix->_21, matrix->_22,
++                                                                    matrix->_31, matrix->_32);
++}
++
+ #endif /* __WINE_D2D1_PRIVATE_H */
+-- 
+2.55.0
+

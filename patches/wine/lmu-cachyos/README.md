@@ -146,8 +146,14 @@ applies 14/14 onto `1ba4fa1` and completes in 12m56s with no warning or error fr
 adds no strings, but the build tree's `bcrypt_main.c` carries it and came from the
 same run.
 
-**Not yet verified in-game**: no VR or multiplayer-join test has been run against
-this build. Everything below predates 0013/0014.
+**0014 verified in-game** on 2026-07-31: a multiplayer join completes. Before the
+patch the handshake never validated, so this is the fix doing its job.
+
+**0013 is not verified in-game**: no VR session has been run against this build.
+The ICO/CUR code is present in the shipped `d3dx9_36.dll` on both architectures,
+but present is not the same as working.
+
+Everything below predates 0013/0014.
 
 **Builds and runs.** `./build.sh cachyos` on `cachyos_11.0_20260713/main`
 produces a complete tool tree and a `.tar.xz`; the shipped

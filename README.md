@@ -233,14 +233,23 @@ here is exactly what is known, as of 2026-07-31:
 | launches, loads onto track | **yes** | **yes** |
 | in-game UI renders correctly | **yes** | **yes** |
 | wheel reconnect mid-session | **yes** | **yes** |
+| multiplayer join (LMU 1.4) | **yes** | **yes** |
+| VR initialises (LMU 1.4) | not tested | not tested |
 
-The two LMU 1.4 patches (VR init, multiplayer join) were added on 2026-07-31.
-Both bases were rebuilt with them and both produce a package whose `d3dx9_36.dll`
-carries the new ICO/CUR code on both architectures, with no warning from
-`d3dx_helpers.c` or `bcrypt_main.c` in either log. **Neither has been tested
-in-game** — no VR or multiplayer-join run yet. The in-game rows above were
-measured with the series that predates these two patches, and 0001–0011 are
-unchanged by this update.
+The two LMU 1.4 patches were added on 2026-07-31 and both bases were rebuilt
+with them.
+
+**Multiplayer join is confirmed in-game on both bases** — the `bcrypt`
+prepend/append fix (GE 0013, cachyos 0014) does what it is meant to.
+
+**VR initialisation is not tested.** The `d3dx9_36` ICO/CUR patch (GE 0012,
+cachyos 0013) is build-verified only: the new code is in the shipped
+`d3dx9_36.dll` on both architectures for both bases, with no warning from
+`d3dx_helpers.c` in either log, but no VR session has been run against it.
+Reports welcome — that is the one row here nobody has filled in.
+
+The rows above it were measured with the series that predates these two
+patches; 0001–0011 are unchanged by this update.
 
 "Fixes present in shipped DLLs" means the built `d2d1.dll` contains
 `d2d_sprite_batch_create` and the Layers strings, and `dinput.dll` / `dinput8.dll`

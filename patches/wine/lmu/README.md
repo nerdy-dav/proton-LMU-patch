@@ -134,8 +134,12 @@ carries the new `ico_entry:` traces and the `image_init: converted DIB to BMP`
 trace, so 0012 is really in the binary; 0013 adds no strings, but the build
 tree's `bcrypt_main.c` carries it and came from the same run.
 
-**Not yet verified in-game**: no VR or multiplayer-join test has been run against
-this build.
+**0013 verified in-game** on 2026-07-31: a multiplayer join completes. Before the
+patch the handshake never validated, so this is the fix doing its job.
+
+**0012 is not verified in-game**: no VR session has been run against this build.
+The ICO/CUR code is present in the shipped `d3dx9_36.dll` on both architectures,
+but present is not the same as working.
 
 **Verified in-game** on 2026-07-28: LMU launches, loads onto the track, the
 in-game UI renders correctly, and a Simagic wheel unplugged and reconnected

@@ -242,11 +242,16 @@ with them.
 **Multiplayer join is confirmed in-game on both bases** — the `bcrypt`
 prepend/append fix (GE 0013, cachyos 0014) does what it is meant to.
 
-**VR initialisation is not tested.** The `d3dx9_36` ICO/CUR patch (GE 0012,
-cachyos 0013) is build-verified only: the new code is in the shipped
-`d3dx9_36.dll` on both architectures for both bases, with no warning from
-`d3dx_helpers.c` in either log, but no VR session has been run against it.
-Reports welcome — that is the one row here nobody has filled in.
+**VR initialisation is not tested, and will not be tested here** — there is no
+VR headset on this end. The `d3dx9_36` ICO/CUR patch (GE 0012, cachyos 0013) is
+build-verified only: the new code is in the shipped `d3dx9_36.dll` on both
+architectures for both bases, with no warning from `d3dx_helpers.c` in either
+log, but nothing has ever exercised the ICO/CUR path at runtime. It is carried
+because upstream ships it for LMU 1.4 and it cannot affect the non-VR paths, not
+because it is known to work.
+
+**If you have a headset, this is the one thing the project cannot check itself.**
+A yes or a no is equally useful — see [Contributing](#contributing).
 
 The rows above it were measured with the series that predates these two
 patches; 0001–0011 are unchanged by this update.
@@ -365,6 +370,10 @@ publishes for this release, fetched over a valid connection. Do not skip that st
 
 Issues and PRs welcome. Useful things to report:
 
+- **Whether VR initialises.** Top of the list: there is no headset here, so the
+  `d3dx9_36` ICO/CUR patch (GE 0012, cachyos 0013) has never been exercised at
+  runtime by anyone. "VR works" or "VR still fails" both close a real gap. If it
+  fails, a `PROTON_LOG=1` log around the point it gives up is what's needed.
 - A `WINEDEBUG=+dinput PROTON_LOG=1` log for any input problem.
 - Whether the series applies to a newer GE tag or cachyos branch — and the
   rebased patches if you did the work.

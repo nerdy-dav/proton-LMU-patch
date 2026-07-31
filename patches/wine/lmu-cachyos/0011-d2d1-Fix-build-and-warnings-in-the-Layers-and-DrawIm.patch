@@ -1,7 +1,7 @@
 From adfe8b07b87848ef7f55991e55e80f4039b5c825 Mon Sep 17 00:00:00 2001
 From: pipodi <pipodi93@gmail.com>
 Date: Tue, 28 Jul 2026 15:19:14 +0200
-Subject: [PATCH 11/11] d2d1: Fix build and warnings in the Layers and
+Subject: [PATCH 11/14] d2d1: Fix build and warnings in the Layers and
  DrawImage paths
 
 The device.c halves of the upstream 'Fix build' and 'Fix warnings treated as
@@ -227,6 +227,3 @@ index d75493d435b..d1bd9a4d334 100644
          TRACE("maskTransform: %s\n", debug_d2d_matrix3x2_f(&maskTransform));
          d2d_matrix_multiply(&maskTransform, &top_layer->prev_transform);
          hr = ID2D1Factory_CreateTransformedGeometry(context->factory,
--- 
-2.55.0
-

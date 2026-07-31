@@ -1,7 +1,7 @@
 From 1889cb655ae70f3c05325a9e8354028c37bae570 Mon Sep 17 00:00:00 2001
 From: Oleg Makarenko <oleg@makarenk.ooo>
 Date: Sat, 27 Sep 2025 20:07:33 +0300
-Subject: [PATCH 02/11] d2d1: Add SpriteBatch implementation
+Subject: [PATCH 02/14] d2d1: Add SpriteBatch implementation
 
 ---
  dlls/d2d1/Makefile.in    |   3 +-
@@ -429,6 +429,3 @@ index 00000000000..4e8dc97acb1
 +    return CONTAINING_RECORD(iface, struct d2d_sprite_batch, ID2D1SpriteBatch_iface);
 +}
 \ No newline at end of file
--- 
-2.55.0
-

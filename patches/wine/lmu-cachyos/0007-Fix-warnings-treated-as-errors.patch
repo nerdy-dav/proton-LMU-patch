@@ -1,7 +1,7 @@
 From 457da4f73efd546b5db522a031fe0aa35abc2e48 Mon Sep 17 00:00:00 2001
 From: pipodi <pipodi93@gmail.com>
 Date: Tue, 28 Jul 2026 14:31:28 +0200
-Subject: [PATCH 07/11] Fix warnings treated as errors
+Subject: [PATCH 07/14] Fix warnings treated as errors
 
 Hoist declarations in the SpriteBatch code and in hid_joystick_device_try_open
 so they compile with -Werror=declaration-after-statement.
@@ -157,6 +157,3 @@ index 58f56ad4ed2..42f034f856e 100644
      memset(serial, 0, sizeof(serial));
  
      if (HidD_GetSerialNumberString( device_file, serial, MAX_PATH * sizeof(WCHAR) )) {
--- 
-2.55.0
-

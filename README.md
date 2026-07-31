@@ -3,7 +3,7 @@
 Wine patches that make **Le Mans Ultimate** run under Proton, plus a script that
 builds a ready-to-use Steam compatibility tool with them applied.
 
-Two problems are fixed:
+Four problems are fixed:
 
 - **The game crashes on race load.** Wine's `d2d1` returns `E_NOTIMPL` from
   `CreateSpriteBatch` without writing the out-parameter; LMU doesn't check the
@@ -13,6 +13,13 @@ Two problems are fixed:
 - **A wheel unplugged mid-session never comes back.** Wine's
   `IDirectInput7::FindDevice` is a stub that returns `DI_OK` without writing
   `*pguidInstance`, so LMU passes uninitialised stack memory to `CreateDevice`.
+- **VR never initialises (LMU 1.4).** The game loads a `.cur` through
+  `D3DXCreateTextureFromFileInMemory`, and wine's `d3dx9_36` doesn't recognise the
+  ICO/CUR container at all.
+- **Multiplayer join fails (LMU 1.4).** The join handshake derives its session key
+  with `BCryptDeriveKey(BCRYPT_KDF_HASH, …)` and a `KDF_SECRET_PREPEND` buffer;
+  wine hashed only the shared secret and ignored the prepend/append buffers, so
+  the key came out wrong.
 
 The series started from [JacKeTUs/wine](https://github.com/JacKeTUs/wine)
 (`lmu-d2d1-hid`, based on GE-Proton10-34), rebased onto GE-Proton11-3 and
@@ -110,9 +117,11 @@ Restart Steam, then select the tool in LMU's compatibility settings.
 | 0009 | `IDirectInput7::FindDevice` — first cut, superseded by 0011 |
 | 0010 | Hoist declarations (`-Werror=declaration-after-statement`) |
 | 0011 | `IDirectInput7::FindDevice` via the joystick cache — **wheel hotplug** |
+| 0012 | ICO/CUR loading in `d3dx9_36` — **LMU 1.4 VR init** |
+| 0013 | `BCryptDeriveKey` prepend/append buffers — **LMU 1.4 multiplayer join** |
 
-That is the GE series (11 patches) in `patches/wine/lmu/`. The cachyos series
-(12 patches) in `patches/wine/lmu-cachyos/` carries the same fixes in a different
+That is the GE series (13 patches) in `patches/wine/lmu/`. The cachyos series
+(14 patches) in `patches/wine/lmu-cachyos/` carries the same fixes in a different
 order and split, because cachyos' wine is Valve's rather than GE's and its `d2d1` has
 diverged. Each directory has its own README with the full per-patch detail,
 including every rebase conflict and how it was resolved:
@@ -189,17 +198,25 @@ Versioned folders, so multiple builds coexist:
 ## Status
 
 Both bases build and package cleanly. What has actually been *run* differs, so
-here is exactly what is known, as of 2026-07-28:
+here is exactly what is known, as of 2026-07-31:
 
 | | proton-cachyos | proton-ge-custom |
 | --- | --- | --- |
 | base tested | `cachyos_11.0_20260713/main` | `GE-Proton11-3` |
-| series applies | 12/12, clean | 11/11, clean |
-| builds | yes (15m07s) | yes (14m32s) |
+| series applies | 14/14, clean | 13/13, clean |
+| builds | yes (12m56s) | yes (2m39s warm, 14m32s cold) |
 | fixes present in shipped DLLs | yes | yes |
 | launches, loads onto track | **yes** | **yes** |
 | in-game UI renders correctly | **yes** | **yes** |
 | wheel reconnect mid-session | **yes** | **yes** |
+
+The two LMU 1.4 patches (VR init, multiplayer join) were added on 2026-07-31.
+Both bases were rebuilt with them and both produce a package whose `d3dx9_36.dll`
+carries the new ICO/CUR code on both architectures, with no warning from
+`d3dx_helpers.c` or `bcrypt_main.c` in either log. **Neither has been tested
+in-game** — no VR or multiplayer-join run yet. The in-game rows above were
+measured with the series that predates these two patches, and 0001–0011 are
+unchanged by this update.
 
 "Fixes present in shipped DLLs" means the built `d2d1.dll` contains
 `d2d_sprite_batch_create` and the Layers strings, and `dinput.dll` / `dinput8.dll`

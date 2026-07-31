@@ -1,8 +1,8 @@
 From e85bb7a35457f767eaddf9d2bc18c65a9b1c6b84 Mon Sep 17 00:00:00 2001
 From: pipodi <pipodi93@gmail.com>
 Date: Tue, 28 Jul 2026 16:46:20 +0200
-Subject: [PATCH] dinput: Implement IDirectInput7::FindDevice by looking up the
- joystick cache
+Subject: [PATCH 12/14] dinput: Implement IDirectInput7::FindDevice by looking
+ up the joystick cache
 
 The stub returned DI_OK without writing *pguidInstance, so callers passed
 uninitialised stack memory straight to CreateDevice. Le Mans Ultimate does

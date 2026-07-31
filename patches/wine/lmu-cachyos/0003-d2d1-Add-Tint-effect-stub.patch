@@ -1,7 +1,7 @@
 From e3076104d55cc1f531c20ae24456bf45c541a814 Mon Sep 17 00:00:00 2001
 From: Oleg Makarenko <oleg@makarenk.ooo>
 Date: Sat, 27 Sep 2025 20:17:06 +0300
-Subject: [PATCH 03/11] d2d1: Add Tint effect stub
+Subject: [PATCH 03/14] d2d1: Add Tint effect stub
 
 ---
  dlls/d2d1/effect.c        | 32 +++++++++++++++++++++++++++++++-
@@ -88,6 +88,3 @@ index 9cd93a8d3bf..526e29c8ce4 100644
 +    D2D1_TINT_PROP_CLAMP_OUTPUT   = 0x1,
 +    D2D1_TINT_PROP_FORCE_DWORD = 0xffffffff
 +} D2D1_TINT_PROP;
--- 
-2.55.0
-

@@ -32,6 +32,8 @@ initialised:
 | 0009 | `IDirectInput7::FindDevice` — first cut, superseded by 0011 |
 | 0010 | Hoist declarations (`-Werror=declaration-after-statement`) |
 | 0011 | `IDirectInput7::FindDevice` via the joystick cache — **wheel hotplug** |
+| 0012 | ICO/CUR entry extraction plus a WIC-less BMP decoder — **LMU 1.4 VR init** |
+| 0013 | `BCryptDeriveKey` `KDF_SECRET_PREPEND`/`APPEND` — **LMU 1.4 multiplayer join** |
 
 ## Dropped from the original series
 
@@ -89,10 +91,51 @@ The two series are now in sync on this fix; the only difference is that GE keeps
 it as a rewrite of 0009 while cachyos never carried 0009 and has it as a single
 patch.
 
+## Picked up for LMU 1.4 (0012, 0013)
+
+Upstream released `GE-Proton10-34-LMU-hid_fixes-vr-bcrypt` on 2026-07-28 for the
+LMU 1.4 update. It is the previous tag plus a wine bump from
+`2790a7a9b91` to `cd8cbc6f89f` (JacKeTUs/wine branch `d2d1-3103`), which adds
+exactly two commits — imported here as 0012 and 0013:
+
+- **0012, `d3dx9_36`** — LMU 1.4 loads a `.cur` through `D3DXCreateTextureFromFileInMemory`.
+  Wine's `d3dx_image_init` doesn't recognise the ICO/CUR container, so VR
+  initialisation failed. The patch extracts the first icon directory entry,
+  fixes up its DIB header (an ICO DIB stores `biHeight` doubled to cover the AND
+  mask), and adds a plain BMP decoder used when WIC is unavailable.
+- **0013, `bcrypt`** — the multiplayer join does an ECDH-P256 exchange and derives
+  the session key with `BCryptDeriveKey(BCRYPT_KDF_HASH, …)` passing a
+  `KDF_SECRET_PREPEND` buffer. `derive_key_hash` hashed only the shared secret and
+  dropped the prepend/append buffers, so the derived key was wrong and the
+  handshake never validated. CNG specifies `Hash(prepend || secret || append)`.
+
+Neither touches d2d1 or dinput, so both are independent of 0001–0011.
+
+**Adapted during the port.** Upstream authored these against GE-Proton10-34's
+wine; on Proton 11's wine, 0012 needed two changes, folded into the patch:
+
+- the `if (!is_d3dx9) return E_FAIL;` early-out the ICO block was inserted next to
+  no longer exists in `d3dx_image_init` — that hunk is dropped and only the ICO
+  block is added;
+- `D3DX_ERROR_INVALID_DATA` is spelled `D3DXERR_INVALIDDATA` in this tree.
+
+0013 applies unchanged. Both patches are byte-identical to `../lmu-cachyos/0013`
+and `0014` — the two bases have not diverged in `bcrypt` or `d3dx9_36`.
+
 ## Status
 
 **Builds and runs.** `./build.sh ge GE-Proton11-3` applies all 11 patches cleanly
 onto `9578fa3613f` and produces a complete tool tree and tarball.
+
+**0012 and 0013 build** (2026-07-31). `./build.sh ge GE-Proton11-3` applies 13/13
+onto `9578fa3613f` and completes with no warning or error from `d3dx_helpers.c`
+or `bcrypt_main.c` in a 284k-line log. The shipped `d3dx9_36.dll`, both arches,
+carries the new `ico_entry:` traces and the `image_init: converted DIB to BMP`
+trace, so 0012 is really in the binary; 0013 adds no strings, but the build
+tree's `bcrypt_main.c` carries it and came from the same run.
+
+**Not yet verified in-game**: no VR or multiplayer-join test has been run against
+this build.
 
 **Verified in-game** on 2026-07-28: LMU launches, loads onto the track, the
 in-game UI renders correctly, and a Simagic wheel unplugged and reconnected

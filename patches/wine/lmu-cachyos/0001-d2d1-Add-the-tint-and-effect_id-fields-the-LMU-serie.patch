@@ -1,7 +1,7 @@
 From e27c7f29b85625c16597af871dc830916f44b898 Mon Sep 17 00:00:00 2001
 From: pipodi <pipodi93@gmail.com>
 Date: Tue, 28 Jul 2026 15:00:42 +0200
-Subject: [PATCH 01/11] d2d1: Add the tint and effect_id fields the LMU series
+Subject: [PATCH 01/14] d2d1: Add the tint and effect_id fields the LMU series
  uses
 
 struct d2d_bitmap gains is_tinted/tint_colour and struct d2d_effect gains
@@ -37,6 +37,3 @@ index 9c78aaf92e2..ac01d30e720 100644
  };
  
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
--- 
-2.55.0
-

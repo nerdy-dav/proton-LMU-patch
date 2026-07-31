@@ -1,7 +1,7 @@
 From ea1878179129ffcade821944b4d4169ef5a8889a Mon Sep 17 00:00:00 2001
 From: Oleg Makarenko <oleg@makarenk.ooo>
 Date: Sat, 27 Sep 2025 20:36:27 +0300
-Subject: [PATCH 08/11] d2d1: Move clip stack to bitmap PushAxisAlignedClip was
+Subject: [PATCH 08/14] d2d1: Move clip stack to bitmap PushAxisAlignedClip was
  preserved across different targets. That's an error. Moved clip_stack onto
  bitmap.
 
@@ -208,6 +208,3 @@ index 27b12024456..35eddb1e6f7 100644
  
      render_target->desc.dpiX = 96.0f;
      render_target->desc.dpiY = 96.0f;
--- 
-2.55.0
-

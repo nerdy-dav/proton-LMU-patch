@@ -1,7 +1,7 @@
 From baea7dfc353b4a0de0d6a2873e43cca25064ee32 Mon Sep 17 00:00:00 2001
 From: pipodi <pipodi93@gmail.com>
 Date: Tue, 28 Jul 2026 14:30:01 +0200
-Subject: [PATCH 06/11] dinput: Fix build - cast RtlComputeCrc32 arguments to
+Subject: [PATCH 06/14] dinput: Fix build - cast RtlComputeCrc32 arguments to
  const BYTE *
 
 ---
@@ -29,6 +29,3 @@ index e470f4a1b14..58f56ad4ed2 100644
      } else {
          WARN("Couldn't get serial number\n");
      }
--- 
-2.55.0
-

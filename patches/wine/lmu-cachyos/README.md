@@ -42,6 +42,8 @@ so most of `../lmu/` does not apply unchanged.
 | 0010 | 0006 | Tint compositing in `DrawImage` and the sprite tint in the pixel shader. One fixup: its declarations of the 0001 fields were dropped as already present; only `struct d2d_effect.output` was taken from that hunk. |
 | 0011 | 0008 + 0010 | The `device.c` halves of both fix patches — the `const` drop on `d2d_layer_stack_push` plus declaration hoists in the Layers and DrawImage paths. |
 | 0012 | (new) | `IDirectInput7::FindDevice` — wheel hotplug. Replaces `../lmu/0009`+`0011`, see below. |
+| 0013 | `../lmu/0012` | ICO/CUR loading in `d3dx9_36` — **LMU 1.4 VR init**. See below. |
+| 0014 | `../lmu/0013` | `BCryptDeriveKey` prepend/append — **LMU 1.4 multiplayer join**. See below. |
 
 ## Hotplug (0012)
 
@@ -99,7 +101,53 @@ three-argument form, matching what upstream records in command lists today.
 Also dropped from 0005: an `ERR()` added to `d2d_device_context_set_error`,
 which logs on every error path. Pure debug noise, no behaviour.
 
+## Picked up for LMU 1.4 (0013, 0014)
+
+Upstream's `GE-Proton10-34-LMU-hid_fixes-vr-bcrypt` (2026-07-28) is the previous
+tag plus a wine bump from `2790a7a9b91` to `cd8cbc6f89f` (JacKeTUs/wine branch
+`d2d1-3103`), adding exactly two commits:
+
+- **0013, `d3dx9_36`** — LMU 1.4 loads a `.cur` through
+  `D3DXCreateTextureFromFileInMemory`. Wine's `d3dx_image_init` doesn't recognise
+  the ICO/CUR container, so VR initialisation failed. The patch extracts the first
+  icon directory entry, fixes up its DIB header (an ICO DIB stores `biHeight`
+  doubled to cover the AND mask), and adds a plain BMP decoder used when WIC is
+  unavailable.
+- **0014, `bcrypt`** — the multiplayer join does an ECDH-P256 exchange and derives
+  the session key with `BCryptDeriveKey(BCRYPT_KDF_HASH, …)` passing a
+  `KDF_SECRET_PREPEND` buffer. `derive_key_hash` hashed only the shared secret and
+  dropped the prepend/append buffers, so the derived key was wrong and the
+  handshake never validated. CNG specifies `Hash(prepend || secret || append)`.
+
+Neither touches `d2d1` or `dinput`, so both are independent of 0001–0012 and sit
+at the end of the series unchanged in order.
+
+**Adapted during the port.** Upstream authored these against GE-Proton10-34's
+wine. On `1ba4fa1`, plain `git am` rejected 0013 and `git am -3` conflicted; the
+resolution, folded into the patch, was:
+
+- upstream inserted its ICO block immediately above
+  `if (!is_d3dx9) return E_FAIL;` in `d3dx_image_init`. That early-out no longer
+  exists in this tree, so that hunk is dropped and only the ICO block is added.
+- `D3DX_ERROR_INVALID_DATA` is spelled `D3DXERR_INVALIDDATA` here (the file
+  `#define`s it locally at the top).
+
+0014 applies with a three-way merge and no content change. Both patches came out
+byte-identical to `../lmu/0012` and `0013` — `bcrypt` and `d3dx9_36` have not
+diverged between the two bases.
+
 ## Status
+
+**0013 and 0014 build** (2026-07-31). `./build.sh cachyos cachyos_11.0_20260713/main`
+applies 14/14 onto `1ba4fa1` and completes in 12m56s with no warning or error from
+`d3dx_helpers.c` or `bcrypt_main.c` in a 354k-line log. The shipped
+`d3dx9_36.dll`, both arches, carries the new `ico_entry:` traces and the
+`image_init: converted DIB to BMP` trace, so 0013 is really in the binary; 0014
+adds no strings, but the build tree's `bcrypt_main.c` carries it and came from the
+same run.
+
+**Not yet verified in-game**: no VR or multiplayer-join test has been run against
+this build. Everything below predates 0013/0014.
 
 **Builds and runs.** `./build.sh cachyos` on `cachyos_11.0_20260713/main`
 produces a complete tool tree and a `.tar.xz`; the shipped

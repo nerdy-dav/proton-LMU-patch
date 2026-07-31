@@ -26,7 +26,7 @@
 
 set -Eeuo pipefail
 
-VERSION="2.1"
+VERSION="2.2"
 GE_REPO="https://github.com/GloriousEggroll/proton-ge-custom.git"
 GE_DEFAULT_TAG="GE-Proton11-3"   # only used if the remote cannot be queried
 CACHY_REPO="https://github.com/CachyOS/proton-cachyos.git"
@@ -236,34 +236,101 @@ fi
 
 cd "$SRC"
 
-# Nine submodule working trees were once found emptied (.git present,
-# correct commit, zero files), which surfaces only as a baffling
-# "No rule to make target '.../configure.ac'".
+# The commit the superproject pins for wine/. This is the authoritative base:
+# the series is authored against it (patches/wine/<series>/BASE) and the rebase
+# fallback replays onto it.
+wine_pin=$(git rev-parse --verify --quiet HEAD:wine || true)
+
+# 'git submodule update' checks wine out at the pinned commit, which silently
+# throws away the patch series -- and any hand-written commits on top of it that
+# are not yet exported to patch files. So we put wine's HEAD back afterwards.
 #
-# 'git submodule update' checks wine out at the commit the superproject pins,
-# which silently throws away the patch series -- and any local work on top of
-# it. Remember where wine was and put it back afterwards; the series is
-# normally re-applied below, but hand-written commits that are not yet exported
-# to patch files would otherwise be lost (recoverable only via the reflog).
+# But only when what we found is genuinely *our work on this base*, meaning a
+# descendant of the pin. An interrupted clone leaves wine/ parked on the upstream
+# branch tip instead, which is a diverged commit rather than work in progress;
+# restoring that replays the series onto the wrong base, where it conflicts in
+# files the series barely touches and looks like the patches have gone stale.
+# The pin moving under us (a new GE tag) lands here too, and taking the new pin
+# is likewise right -- the series gets re-applied onto the new base below.
+#
+# Whatever we decline to restore is kept as a rescue branch first, so a bad
+# guess here can never cost work.
 wine_head=""
-[[ -d wine/.git || -f wine/.git ]] && wine_head=$(git -C wine rev-parse HEAD 2>/dev/null || true)
+if [[ -d wine/.git || -f wine/.git ]]; then
+    wine_head=$(git -C wine rev-parse HEAD 2>/dev/null || true)
+fi
 
+wine_restore=""
+if [[ -n "$wine_head" && -n "$wine_pin" && "$wine_head" != "$wine_pin" ]]; then
+    if git -C wine merge-base --is-ancestor "$wine_pin" "$wine_head" 2>/dev/null; then
+        wine_restore="$wine_head"
+    else
+        rescue="lmu-rescue/$(date +%Y%m%d-%H%M%S)"
+        if git -C wine branch -q -f "$rescue" "$wine_head" 2>/dev/null; then
+            warn "wine/ was at ${wine_head:0:11}, which does not build on the pinned"
+            warn "  ${wine_pin:0:11} -- taking the pin. Old HEAD kept as branch '$rescue'."
+        else
+            warn "wine/ was at ${wine_head:0:11}, which does not build on the pinned"
+            warn "  ${wine_pin:0:11} -- taking the pin (could not save a rescue branch)."
+        fi
+    fi
+fi
+
+# Clone failures here are usually transient -- sourceware.org rate-limits with
+# HTTP 429, mirrors flake -- and a retry costs nothing next to a failed build.
 echo "  updating submodules (this takes a while on first run)"
-git submodule update --init --recursive || die "submodule update failed"
+submodule_update() {
+    local attempt
+    for attempt in 1 2 3; do
+        if git submodule update --init --recursive; then return 0; fi
+        (( attempt < 3 )) || return 1
+        warn "submodule update failed (attempt $attempt/3), retrying in $((attempt * 15))s"
+        sleep $((attempt * 15))
+    done
+}
+submodule_update || die "submodule update failed after 3 attempts.
+     If the error above is a clone failure on one submodule, it is usually
+     transient -- re-run, or fetch just that one:
+       git -C $SRC submodule update --init --recursive -- <path>"
 
-if [[ -n "$wine_head" ]] && [[ "$(git -C wine rev-parse HEAD)" != "$wine_head" ]]; then
-    git -C wine checkout -q "$wine_head" \
-        || die "submodule update moved wine/ off $wine_head and it could not be restored"
+if [[ -n "$wine_restore" ]] && [[ "$(git -C wine rev-parse HEAD)" != "$wine_restore" ]]; then
+    git -C wine checkout -q "$wine_restore" \
+        || die "submodule update moved wine/ off $wine_restore and it could not be restored"
     warn "restored wine/ to $(git -C wine rev-parse --short HEAD) (submodule update had reset it)"
 fi
 
-empty=$(git submodule foreach --recursive --quiet \
-    'if [ "$(ls -A | grep -cv "^\.git$")" = "0" ]; then echo "$sm_path"; fi; true')
+# An interrupted clone can leave a submodule registered at the right commit with
+# an *empty* working tree (.git present, correct sha, zero files). 'git submodule
+# update' then considers it up to date and does nothing, so this does not
+# self-heal on a re-run; the only symptom is a baffling "No rule to make target
+# '.../configure.ac'" much later. The data is already in the submodule's own
+# object store, so a forced checkout repopulates it without touching its commit.
+list_empty_submodules() {
+    git submodule foreach --recursive --quiet \
+        'if [ "$(ls -A | grep -cv "^\.git$")" = "0" ]; then echo "$displaypath"; fi; true'
+}
+
+empty=$(list_empty_submodules)
 if [[ -n "$empty" ]]; then
-    printf '%s\n' "$empty" | sed 's/^/      /'
-    die "submodule working trees above are empty. Restore with:
-       git submodule update --init --recursive -- <path>...
-     Do NOT add --force globally: it also reverts the patch layer in wine/."
+    n=$(printf '%s\n' "$empty" | grep -c .)
+    warn "$n submodule working tree(s) are empty (interrupted clone) -- repopulating"
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        # Scoped to one path on purpose: --force across all submodules would
+        # also revert the patch series in wine/.
+        git -C "$path" checkout -f HEAD -- . 2>/dev/null \
+            || git submodule update --init --recursive --force -- "$path" >/dev/null 2>&1 \
+            || true
+    done <<<"$empty"
+
+    empty=$(list_empty_submodules)
+    if [[ -n "$empty" ]]; then
+        printf '%s\n' "$empty" | sed 's/^/      /'
+        die "submodule working trees above are still empty after a forced checkout.
+     Their object stores are probably damaged; re-clone them:
+       rm -rf <path> && git -C $SRC submodule update --init --recursive -- <path>"
+    fi
+    ok "repopulated $n submodule working tree(s)"
 fi
 ok "all submodule working trees populated"
 

@@ -275,6 +275,26 @@ to redo the rebase by hand; resolve the conflicts, re-export with
 `git format-patch` and update `BASE`. See
 [Keeping up with new releases](#keeping-up-with-new-releases).
 
+**The clone was interrupted.** Re-run the build; since v2.2 the script repairs
+this itself. An aborted clone leaves two states that look fine but are not, and
+both used to surface much later as something unrelated:
+
+- `wine/` parked on the upstream *branch tip* instead of the commit the
+  superproject pins, because the submodule checkout never finished. The script
+  used to preserve that HEAD on every later run, replaying the series onto a
+  diverged base — which fails in `joystick_hid.c` and reads as the patches having
+  gone stale. It now restores wine's HEAD only when that HEAD actually contains
+  the pinned commit, and parks anything else on an `lmu-rescue/<timestamp>`
+  branch first.
+- Submodules registered at the right commit with an **empty working tree**.
+  `git submodule update` considers them up to date and does nothing, so this
+  never self-healed; the only symptom was `No rule to make target
+  '.../configure.ac'`. They are now repopulated automatically with a forced
+  checkout from the submodule's own object store.
+
+Clone failures during the submodule step are retried three times — sourceware.org
+rate-limits `bzip2` with HTTP 429 fairly often.
+
 **The UI is garbled but the game runs.** Layers didn't apply — patches 0004–0006
 on GE, 0008–0011 on cachyos. Check they are in `git -C <version>-src/wine log`.
 

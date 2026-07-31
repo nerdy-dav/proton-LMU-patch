@@ -207,3 +207,12 @@ grep -E "FindDevice|matched instance|get_instance_from_guid" ~/steam-2399420.log
 update` resets `wine/` to the commit the superproject pins. It now saves and
 restores wine's HEAD, but **export your work to patch files here before
 rebuilding** — that is what the build actually applies.
+
+The restore is deliberately conditional: wine's HEAD is put back only when it
+contains the pinned commit, i.e. when it really is your work on this base. A
+HEAD that has diverged from the pin — an interrupted clone leaving wine on the
+upstream branch tip, or the pin moving under you with a new release — is *not*
+restored, because replaying the series onto it produces conflicts that have
+nothing to do with the series. That HEAD is kept as an `lmu-rescue/<timestamp>`
+branch in `wine/`, so nothing is lost either way; `git -C <version>-src/wine
+branch --list 'lmu-rescue/*'` finds it.

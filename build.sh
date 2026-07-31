@@ -20,6 +20,8 @@
 #   ./build.sh GE-Proton11-3            # variant inferred from the tag name
 #   ./build.sh --check-only             # sanity checks only, change nothing
 #   ./build.sh -f ge master             # force a fresh re-clone
+#   ./build.sh cachyos --install        # build, then install into Steam
+#   ./build.sh cachyos --install-only   # install an already-built package
 #
 # Each variant+version gets its own -src/ and -build/ folder, so
 # builds never overwrite each other.
@@ -40,7 +42,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PATCH_ROOT="${SCRIPT_DIR}/patches/wine"
 GE_PREP="patches/protonprep-valve-staging.sh"
 
-FORCE=0 CHECK_ONLY=0 SKIP_PATCH=0 NO_CLEAN=0 ASSUME_YES=0
+FORCE=0 CHECK_ONLY=0 SKIP_PATCH=0 NO_CLEAN=0 ASSUME_YES=0 INSTALL=0 INSTALL_ONLY=0
 VARIANT="" TAG=""
 
 # -------------------- Output --------------------
@@ -59,7 +61,7 @@ need()   { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not foun
 trap 'die "unexpected error at line $LINENO"' ERR
 
 usage() {
-    sed -n '3,26p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
+    sed -n '3,28p' "${BASH_SOURCE[0]}" | sed 's/^# \?//'
     exit 0
 }
 
@@ -71,6 +73,8 @@ while [[ $# -gt 0 ]]; do
         --check-only)  CHECK_ONLY=1; shift ;;
         --skip-patch)  SKIP_PATCH=1; shift ;;
         --no-clean)    NO_CLEAN=1; shift ;;
+        --install)     INSTALL=1; shift ;;
+        --install-only) INSTALL=1; INSTALL_ONLY=1; shift ;;
         -y|--yes)      ASSUME_YES=1; shift ;;
         ge|proton-ge|eggroll)  VARIANT="ge"; shift ;;
         cachy|cachyos)         VARIANT="cachyos"; shift ;;
@@ -186,6 +190,99 @@ header "  Variant    : $VARIANT"
 header "  Tag/Branch : $TAG"
 header "  Package    : $BUILD_NAME"
 header "============================================================"
+
+# -------------------- Install --------------------
+# Proton's own 'make install' target depends on 'all', so it re-enters the build
+# -- on the *host*, outside the steamrt container the build actually ran in.
+# On any distro whose ffmpeg is newer than the runtime's, winedmo then fails to
+# compile and the install never happens. So install from the finished artifact
+# instead: the tarball if there is one (it is what the checksum covers),
+# otherwise the tool tree.
+install_package() {
+    local tree="$BUILD/$BUILD_NAME" tarball="" src_desc target staging ext dll marker found f pair
+
+    for ext in tar.xz tar.gz; do
+        [[ -f "$BUILD/$BUILD_NAME.$ext" ]] && { tarball="$BUILD/$BUILD_NAME.$ext"; break; }
+    done
+    [[ -n "$tarball" || -d "$tree" ]] || die "nothing to install for $BUILD_NAME.
+     Expected $BUILD/$BUILD_NAME.tar.* or $tree
+     Build it first:  ./build.sh $VARIANT $TAG"
+
+    [[ -d "$STEAM_DIR" ]] || die "Steam directory not found: $STEAM_DIR
+     Point at the right one:  STEAM_DIR=/path/to/Steam ./build.sh $VARIANT $TAG --install-only"
+
+    if [[ -n "$tarball" ]]; then
+        src_desc="$(basename "$tarball")"
+        if [[ -f "$BUILD/$BUILD_NAME.sha512sum" ]]; then
+            ( cd "$BUILD" && sha512sum -c --status "$BUILD_NAME.sha512sum" ) \
+                || die "checksum mismatch on $src_desc — rebuild before installing"
+            ok "checksum verified: $src_desc"
+        else
+            warn "no .sha512sum alongside $src_desc — installing it unverified"
+        fi
+    else
+        src_desc="$(basename "$tree")/"
+        warn "no tarball found; installing from the tool tree instead"
+    fi
+
+    target="$COMPAT_DIR/$BUILD_NAME"
+    staging="$COMPAT_DIR/.$BUILD_NAME.incoming.$$"
+    mkdir -p "$COMPAT_DIR"
+
+    # Unpack beside the target and swap it in, so an interrupted install cannot
+    # leave a half-written tool that Steam still lists and offers to run.
+    rm -rf "$staging"; mkdir -p "$staging"
+    if [[ -n "$tarball" ]]; then
+        tar -xf "$tarball" -C "$staging" --strip-components=1 \
+            || { rm -rf "$staging"; die "extracting $src_desc failed"; }
+    else
+        cp -a "$tree/." "$staging/" || { rm -rf "$staging"; die "copying $tree failed"; }
+    fi
+
+    for f in proton compatibilitytool.vdf toolmanifest.vdf; do
+        [[ -f "$staging/$f" ]] || { rm -rf "$staging"; die "$src_desc has no $f — not a compat tool"; }
+    done
+
+    if [[ -e "$target" ]]; then
+        # 'make redist' ships the tree read-only (mode 555), so plain rm fails.
+        chmod -R u+w "$target" 2>/dev/null || true
+        rm -rf "$target" || { rm -rf "$staging"; die "could not remove the previous $target"; }
+        ok "replaced the previously installed $BUILD_NAME"
+    fi
+    mv "$staging" "$target" || { rm -rf "$staging"; die "could not move the new tool into $target"; }
+    ok "installed to $target ($(du -sh "$target" | cut -f1))"
+
+    # The whole point of this repo is the patched DLLs, so assert they survived
+    # packaging rather than trusting that a tarball of the right size is right.
+    # grep -a, not strings(1): binutils is not a build dependency.
+    for pair in d2d1.dll:d2d_sprite_batch_create \
+                dinput8.dll:hid_joystick_find_device \
+                d3dx9_36.dll:ico_entry; do
+        dll="${pair%%:*}"; marker="${pair#*:}"; found=""
+        for f in "$target"/files/lib*/wine/x86_64-windows/"$dll"; do
+            [[ -f "$f" ]] && grep -aq "$marker" "$f" && { found=1; break; }
+        done
+        [[ -n "$found" ]] || warn "$dll in the installed tool has no '$marker' — patch missing?"
+    done
+    ok "installed DLLs carry the LMU patches"
+
+    if command -v pgrep >/dev/null 2>&1 && pgrep -x steam >/dev/null 2>&1; then
+        warn "Steam is running — restart it before the new tool shows up"
+    fi
+}
+
+if (( INSTALL_ONLY )); then
+    ########################################
+    step "Install"
+    ########################################
+    install_package
+    echo
+    header "============================================================"
+    header "  INSTALLED"
+    header "============================================================"
+    echo "Restart Steam, then select $BUILD_NAME for Le Mans Ultimate."
+    exit 0
+fi
 
 ########################################
 step "Pre-flight checks"
@@ -642,6 +739,13 @@ for dll in "${dlls[@]}"; do
 done
 ok "checked patched modules (${dlls[*]})"
 
+if (( INSTALL )); then
+    ########################################
+    step "Install"
+    ########################################
+    install_package
+fi
+
 echo
 header "============================================================"
 header "  BUILD SUCCESSFUL"
@@ -652,13 +756,20 @@ printf '  %sSource%s   : %s\n'    "$B" "$N" "$SRC"
 printf '  %sPackage%s  : %s\n'    "$B" "$N" "${tarball:-$tree}"
 header "============================================================"
 echo
-echo "Install with:"
-echo "  cd $BUILD && make install STEAM_DIR=$STEAM_DIR"
-echo
-if [[ -n "$tarball" ]]; then
-    echo "or manually:"
-    echo "  mkdir -p $COMPAT_DIR/$BUILD_NAME"
-    echo "  tar -xf \"$tarball\" -C $COMPAT_DIR/$BUILD_NAME --strip-components=1"
+if (( INSTALL )); then
+    printf '  %sInstalled%s: %s\n\n' "$B" "$N" "$COMPAT_DIR/$BUILD_NAME"
+else
+    echo "Install with:"
+    echo "  ./build.sh $VARIANT $TAG --install-only"
     echo
+    if [[ -n "$tarball" ]]; then
+        echo "or by hand:"
+        echo "  mkdir -p $COMPAT_DIR/$BUILD_NAME"
+        echo "  tar -xf \"$tarball\" -C $COMPAT_DIR/$BUILD_NAME --strip-components=1"
+        echo
+    fi
+    # Deliberately not suggesting 'make install': it depends on 'all', so it
+    # rebuilds on the host outside the container and dies in winedmo wherever
+    # the system ffmpeg is newer than the runtime's.
 fi
 echo "Then restart Steam and select $BUILD_NAME for Le Mans Ultimate."

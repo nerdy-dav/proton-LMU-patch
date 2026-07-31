@@ -68,8 +68,10 @@ With no version given, both variants resolve the newest release live: the highes
 release instead of tagging — the newest `cachyos_*/main` branch for `cachyos`. `…/main` is the Steam Linux
 Runtime flavour (folder suffix `-slr`), `…/main_native` the native one (`-native`).
 
-Other flags: `--skip-patch` (patch layer already applied), `--no-clean` (reuse the
-build dir), `-y` (don't prompt before deleting it).
+Other flags: `--install` (install into Steam after building), `--install-only`
+(install an already-built package and do nothing else), `--skip-patch` (patch
+layer already applied), `--no-clean` (reuse the build dir), `-y` (don't prompt
+before deleting it).
 
 ## Installing
 
@@ -83,10 +85,22 @@ proton-cachyos-11.0-20260713-slr-build/proton-cachyos-…-slr-LMU.tar.xz        
 Install it with:
 
 ```bash
-cd GE-Proton11-3-build && make install STEAM_DIR=~/.local/share/Steam
+./build.sh cachyos --install-only     # install what is already built
+./build.sh cachyos --install          # or build and install in one go
 ```
 
-or by hand:
+`--install-only` skips the source tree entirely — no clone, no submodule update,
+no patching — so it is also the quickest way to reinstall after a Steam reset.
+
+What it does: verifies the tarball against its `.sha512sum`, unpacks it to a
+staging directory *beside* the target and swaps it in (an interrupted install
+can't leave a half-written tool that Steam still lists), removes any previous
+install of the same name — `chmod -R u+w` first, since `make redist` ships the
+tree mode 555 — then greps the installed DLLs for `d2d_sprite_batch_create`,
+`hid_joystick_find_device` and `ico_entry` to prove the patches survived
+packaging. It warns if Steam is running.
+
+By hand, if you prefer:
 
 ```bash
 mkdir -p ~/.local/share/Steam/compatibilitytools.d/GE-Proton11-3-LMU
@@ -94,11 +108,21 @@ tar -xf GE-Proton11-3-LMU.tar.gz \
     -C ~/.local/share/Steam/compatibilitytools.d/GE-Proton11-3-LMU --strip-components=1
 ```
 
+**Don't use Proton's own `make install`.** Its `install` target depends on `all`,
+so it re-enters the build on the *host*, outside the steamrt container the build
+actually ran in. On any distro whose ffmpeg is newer than the runtime's, `winedmo`
+then fails to compile (`unknown type name 'AVBSFInternal'`) and nothing is
+installed. `build.sh` no longer suggests it.
+
 Proton's Makefile defaults `STEAM_DIR` to `~/.steam/root`, which is usually a
 symlink to the real library but not always — `build.sh` detects the actual
 location (`$STEAM_DIR` from the environment wins, then `~/.local/share/Steam`,
-`~/.steam/root`, `~/.steam/steam`, the flatpak path) and prints both commands
-with it filled in.
+`~/.steam/root`, `~/.steam/steam`, the flatpak path). Override it if the guess
+is wrong:
+
+```bash
+STEAM_DIR=/mnt/games/Steam ./build.sh cachyos --install-only
+```
 
 Restart Steam, then select the tool in LMU's compatibility settings.
 

@@ -8,7 +8,7 @@ Four problems are fixed:
 - **The game crashes on race load.** Wine's `d2d1` returns `E_NOTIMPL` from
   `CreateSpriteBatch` without writing the out-parameter; LMU doesn't check the
   HRESULT and dereferences NULL, giving an `EXCEPTION_ACCESS_VIOLATION` (write to
-  address 0). Fixing this needs a real `ID2D1SpriteBatch`, and — for the in-game
+  address 0). Fixing this needs `ID2D1SpriteBatch`, and — for the in-game
   UI to actually render rather than come out garbled — Layers and Tint too.
 - **A wheel unplugged mid-session never comes back.** Wine's
   `IDirectInput7::FindDevice` is a stub that returns `DI_OK` without writing
@@ -26,7 +26,7 @@ The series started from [JacKeTUs/wine](https://github.com/JacKeTUs/wine)
 (`lmu-d2d1-hid`, based on GE-Proton10-34), rebased onto GE-Proton11-3 and
 proton-cachyos, with the upstreamed patches dropped and the hotplug fix rewritten.
 Because wine `e893f50` — the wine pinned by `cachyos_11.0_release/_sauce` —
-already carries real `ID2D1SpriteBatch` support and the bcrypt prepend fix,
+already carries `ID2D1SpriteBatch` support and the bcrypt prepend fix,
 `_sauce` has its own curated twelve-patch series rather than reusing the older
 cachyos series.
 
@@ -131,7 +131,7 @@ then fails to compile (`unknown type name 'AVBSFInternal'`) and nothing is
 installed. `build.sh` no longer suggests it.
 
 Proton's Makefile defaults `STEAM_DIR` to `~/.steam/root`, which is usually a
-symlink to the real library but not always — `build.sh` detects the actual
+symlink to the library but not always — `build.sh` detects the actual
 location (`$STEAM_DIR` from the environment wins, then `~/.local/share/Steam`,
 `~/.steam/root`, `~/.steam/steam`, the flatpak path). Override it if the guess
 is wrong:
@@ -173,7 +173,7 @@ including every rebase conflict and how it was resolved:
 
 ### proton-cachyos `_sauce` series (12 patches)
 
-`cachyos_11.0_release/_sauce` pins wine `e893f50`, which already ships a real
+`cachyos_11.0_release/_sauce` pins wine `e893f50`, which already ships the
 `ID2D1SpriteBatch`, command-list layer support and the bcrypt prepend fix. Its
 series therefore carries only the missing LMU work, plus one build-compatibility
 patch for the SDK's FFmpeg 7:
@@ -222,7 +222,7 @@ The series is authored against one specific wine commit, recorded in
    hunk, which plain `am` rejects.
 3. **replay at `BASE`, then `git rebase --onto` the new wine** — a full
    three-way merge with every blob available. This is the one that survives
-   real churn, and it is what upstream reworking nearby code needs.
+   churn, and it is what upstream reworking nearby code needs.
 
 If the rebase conflicts, upstream has changed the same lines the series changes
 and a human has to decide what the merged result should be. The script restores
@@ -459,7 +459,7 @@ Issues and PRs welcome. Useful things to report:
 - **Whether VR initialises.** Top of the list: there is no headset here, so the
   `d3dx9_36` ICO/CUR patch (GE 0012, older cachyos 0013, `_sauce` 0010) has never
   been exercised at runtime by anyone. "VR works" or "VR still fails" both close
-  a real gap. If it fails, a `PROTON_LOG=1` log around the point it gives up is
+  a gap. If it fails, a `PROTON_LOG=1` log around the point it gives up is
   what's needed.
 - A `WINEDEBUG=+dinput PROTON_LOG=1` log for any input problem.
 - Whether the series applies to a newer GE tag or cachyos branch — and the

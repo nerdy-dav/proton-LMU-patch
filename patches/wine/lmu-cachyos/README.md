@@ -6,8 +6,13 @@ compositing and the wheel-binding fix.
 Rebased onto: `CachyOS/wine-cachyos` commit `1ba4fa1`, the wine submodule of
 proton-cachyos branch `cachyos_11.0_20260713/main`.
 
-`build.sh` picks this directory up automatically for `./build.sh cachyos`; the
+`build.sh` picks this directory up for the dated `cachyos_*/main` branches; the
 GE series in `../lmu/` is used for GE builds.
+
+For `cachyos_11.0_release/_sauce` (wine `e893f50`), use the separate
+[`../lmu-proton-cachyos-11.0-release-sauce/`](../lmu-proton-cachyos-11.0-release-sauce/README.md)
+series: `_sauce` already contains `ID2D1SpriteBatch` and the bcrypt prepend
+fix, and its d2d1 has diverged enough that this 14-patch series does not apply.
 
 ## Why cachyos needs its own series
 

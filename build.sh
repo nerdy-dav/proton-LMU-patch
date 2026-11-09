@@ -16,7 +16,8 @@
 #   ./build.sh                          # ge, newest GE-Proton tag on the remote
 #   ./build.sh ge GE-Proton11-3         # a specific GE tag
 #   ./build.sh cachyos                  # newest proton-cachyos release branch
-#   ./build.sh cachyos cachyos_11.0_20260713/main
+#   ./build.sh cachyos cachyos_11.0_release/_sauce
+#   ./build.sh cachyos cachyos_11.0_20261014/main
 #   ./build.sh GE-Proton11-3            # variant inferred from the tag name
 #   ./build.sh --check-only             # sanity checks only, change nothing
 #   ./build.sh -f ge master             # force a fresh re-clone
@@ -32,7 +33,7 @@ VERSION="2.2"
 GE_REPO="https://github.com/GloriousEggroll/proton-ge-custom.git"
 GE_DEFAULT_TAG="GE-Proton11-3"   # only used if the remote cannot be queried
 CACHY_REPO="https://github.com/CachyOS/proton-cachyos.git"
-CACHY_FALLBACK_BRANCH="cachyos_11.0_20260713/main"
+CACHY_FALLBACK_BRANCH="cachyos_11.0_release/_sauce"
 
 # Named in messages only. The commit each series was actually built against is
 # recorded in patches/wine/<series>/BASE and is what the rebase fallback uses.
@@ -98,10 +99,14 @@ need git; need make; need sed; need tar; need awk
 
 # -------------------- Variant resolution --------------------
 # CachyOS cuts a new branch per release rather than tagging, so the default is
-# resolved live: the newest cachyos_<ver>_<date>/main branch on the remote.
+# resolved live. Both the dated cachyos_<ver>_<date>/main branches and the newer
+# cachyos_<ver>_release/_sauce branches are considered; sort -V puts the release
+# branch (and its /main_native sibling) after the dated ones.
 newest_cachy_branch() {
-    git ls-remote --heads "$CACHY_REPO" 'refs/heads/cachyos_*/main' 2>/dev/null \
-        | sed 's|.*refs/heads/||' | sort -V | tail -1
+    git ls-remote --heads "$CACHY_REPO" 'refs/heads/cachyos_*/*' 2>/dev/null \
+        | sed 's|.*refs/heads/||' \
+        | grep -E '^cachyos_[^/]+/(main|main_native|_sauce)$' \
+        | sort -V | tail -1
 }
 
 # GE tags each release, so the default is the newest GE-Proton tag on the
@@ -191,6 +196,39 @@ header "  Tag/Branch : $TAG"
 header "  Package    : $BUILD_NAME"
 header "============================================================"
 
+# -------------------- Package --------------------
+# Most bases leave the tool tree at $BUILD/$BUILD_NAME plus a tarball and
+# checksum. Current proton-cachyos release branches (_sauce, _native, _action)
+# instead 'make redist' into $BUILD/redist and stop there. Normalize the latter
+# to the shape the rest of the script (and --install-only) expects.
+finalize_package() {
+    local tree="$BUILD/$BUILD_NAME" tarball="" ext
+
+    if [[ -d "$BUILD/redist" ]]; then
+        chmod -R u+w "$BUILD/redist" 2>/dev/null || true
+        if [[ -d "$tree" ]]; then
+            rm -rf "$BUILD/redist"
+        else
+            mv "$BUILD/redist" "$tree" \
+                || die "could not move $BUILD/redist to $tree"
+            ok "normalized redist/ to $(basename "$tree")/"
+        fi
+    fi
+
+    for ext in tar.xz tar.gz; do
+        [[ -f "$BUILD/$BUILD_NAME.$ext" ]] && { tarball="$BUILD/$BUILD_NAME.$ext"; break; }
+    done
+
+    if [[ -d "$tree" && -z "$tarball" ]]; then
+        echo "  packaging $(basename "$tree") -> $BUILD_NAME.tar.xz"
+        ( cd "$BUILD" && XZ_OPT="-9 -T0" tar -cJf "$BUILD_NAME.tar.xz" "$BUILD_NAME" ) \
+            || die "could not create $BUILD_NAME.tar.xz"
+        ( cd "$BUILD" && sha512sum "$BUILD_NAME.tar.xz" > "$BUILD_NAME.sha512sum" ) \
+            || die "could not checksum $BUILD_NAME.tar.xz"
+        ok "package: $BUILD_NAME.tar.xz"
+    fi
+}
+
 # -------------------- Install --------------------
 # Proton's own 'make install' target depends on 'all', so it re-enters the build
 # -- on the *host*, outside the steamrt container the build actually ran in.
@@ -200,6 +238,8 @@ header "============================================================"
 # otherwise the tool tree.
 install_package() {
     local tree="$BUILD/$BUILD_NAME" tarball="" src_desc target staging ext dll marker found f pair
+
+    finalize_package
 
     for ext in tar.xz tar.gz; do
         [[ -f "$BUILD/$BUILD_NAME.$ext" ]] && { tarball="$BUILD/$BUILD_NAME.$ext"; break; }
@@ -428,10 +468,20 @@ if [[ -n "$empty" ]]; then
        rm -rf <path> && git -C $SRC submodule update --init --recursive -- <path>"
     fi
     ok "repopulated $n submodule working tree(s)"
+
+    # Those parents now have their .gitmodules back, so nested submodules that
+    # the first recursive pass could not see are still uninitialized.
+    echo "  updating nested submodules exposed by the repair"
+    submodule_update || die "submodule update failed after repopulating empty trees"
 fi
 ok "all submodule working trees populated"
 
 uninit=$(git submodule status --recursive | awk '/^-/ {print $2}')
+if [[ -n "$uninit" ]]; then
+    warn "nested submodules still uninitialized -- retrying recursive update"
+    submodule_update || true
+    uninit=$(git submodule status --recursive | awk '/^-/ {print $2}')
+fi
 [[ -z "$uninit" ]] || { printf '%s\n' "$uninit" | sed 's/^/      /'
     die "submodules above are uninitialized"; }
 ok "all nested submodules initialized"
@@ -703,9 +753,10 @@ if (( build_rc != 0 )); then
     die "make redist exited $build_rc"
 fi
 
-# Both bases emit $BUILD/$BUILD_NAME/ plus an archive and checksum alongside it
-# -- there is no redist/ directory, despite GE's README wording. GE compresses
-# with gzip, CachyOS with xz.
+# Most bases leave $BUILD/$BUILD_NAME/ plus an archive and checksum alongside it.
+# Current proton-cachyos release branches (_sauce) only leave redist/; normalize
+# that to the same shape before checking the result.
+finalize_package
 tree="$BUILD/$BUILD_NAME"
 tarball=""
 for ext in tar.xz tar.gz; do

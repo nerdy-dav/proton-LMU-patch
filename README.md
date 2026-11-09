@@ -18,12 +18,17 @@ Four problems are fixed:
   ICO/CUR container at all.
 - **Multiplayer join fails (LMU 1.4).** The join handshake derives its session key
   with `BCryptDeriveKey(BCRYPT_KDF_HASH, …)` and a `KDF_SECRET_PREPEND` buffer;
-  wine hashed only the shared secret and ignored the prepend/append buffers, so
-  the key came out wrong.
+  older wine hashed only the shared secret and ignored the prepend/append
+  buffers, so the key came out wrong. `_sauce` already handles prepend; its series
+  adds the missing append support.
 
 The series started from [JacKeTUs/wine](https://github.com/JacKeTUs/wine)
 (`lmu-d2d1-hid`, based on GE-Proton10-34), rebased onto GE-Proton11-3 and
 proton-cachyos, with the upstreamed patches dropped and the hotplug fix rewritten.
+Because wine `e893f50` — the wine pinned by `cachyos_11.0_release/_sauce` —
+already carries real `ID2D1SpriteBatch` support and the bcrypt prepend fix,
+`_sauce` has its own curated twelve-patch series rather than reusing the older
+cachyos series.
 
 ## Quick start
 
@@ -31,14 +36,16 @@ proton-cachyos, with the upstreamed patches dropped and the hotplug fix rewritte
 git clone git@github.com:Pipodi/proton-LMU-patch.git
 cd proton-LMU-patch
 chmod +x build.sh
-./build.sh cachyos          # or: ./build.sh   (GE, the default)
+./build.sh cachyos cachyos_11.0_release/_sauce   # or: ./build.sh   (GE, the default)
 ```
 
 The script prints the exact install command when it finishes. Restart Steam,
 then pick the new tool in LMU's compatibility settings.
 
-**Which base should I pick?** `cachyos` is the more thoroughly tested of the two
-— see [Status](#status). Pick `ge` if you already run GE-Proton for everything else.
+**Which base should I pick?** The older `cachyos` series is the more thoroughly
+tested cachyos path; `cachyos_11.0_release/_sauce` applies cleanly but is still
+awaiting its first full build and in-game run — see [Status](#status). Pick `ge`
+if you already run GE-Proton for everything else.
 
 ## Requirements
 
@@ -57,7 +64,8 @@ the default) and **`cachyos`** ([proton-cachyos](https://github.com/CachyOS/prot
 ./build.sh                            # ge, newest GE-Proton tag on the remote
 ./build.sh ge GE-Proton11-3           # a specific GE tag
 ./build.sh cachyos                    # newest proton-cachyos release branch
-./build.sh cachyos cachyos_11.0_20260713/main
+./build.sh cachyos cachyos_11.0_release/_sauce
+./build.sh cachyos cachyos_11.0_20261014/main
 ./build.sh GE-Proton11-3              # variant inferred from the tag name
 ./build.sh --check-only               # sanity checks only, change nothing
 ./build.sh -f ge master               # force a fresh re-clone
@@ -65,8 +73,10 @@ the default) and **`cachyos`** ([proton-cachyos](https://github.com/CachyOS/prot
 
 With no version given, both variants resolve the newest release live: the highest
 `GE-Proton<major>-<minor>` tag for `ge`, and — since CachyOS cuts a branch per
-release instead of tagging — the newest `cachyos_*/main` branch for `cachyos`. `…/main` is the Steam Linux
-Runtime flavour (folder suffix `-slr`), `…/main_native` the native one (`-native`).
+release instead of tagging — the newest `cachyos_*/main`, `…/main_native` or
+`…/_sauce` branch for `cachyos`. `…/main` is the Steam Linux Runtime flavour
+(folder suffix `-slr`), `…/main_native` the native one (`-native`), and
+`…/_sauce` keeps the `-sauce` suffix.
 
 Other flags: `--install` (install into Steam after building), `--install-only`
 (install an already-built package and do nothing else), `--skip-patch` (patch
@@ -79,18 +89,24 @@ The build ends with:
 
 ```
 GE-Proton11-3-build/GE-Proton11-3-LMU.tar.gz                                  # ge
-proton-cachyos-11.0-20260713-slr-build/proton-cachyos-…-slr-LMU.tar.xz        # cachyos
+proton-cachyos-11.0-release-sauce-build/proton-cachyos-…-LMU.tar.xz          # cachyos _sauce
+proton-cachyos-11.0-20260713-slr-build/proton-cachyos-…-slr-LMU.tar.xz        # older cachyos
 ```
 
 Install it with:
 
 ```bash
-./build.sh cachyos --install-only     # install what is already built
-./build.sh cachyos --install          # or build and install in one go
+./build.sh cachyos cachyos_11.0_release/_sauce --install-only  # install what is already built
+./build.sh cachyos cachyos_11.0_release/_sauce --install       # or build and install in one go
 ```
 
 `--install-only` skips the source tree entirely — no clone, no submodule update,
 no patching — so it is also the quickest way to reinstall after a Steam reset.
+
+`cachyos_11.0_release/_sauce` (and its `_native`/`_action` siblings) only
+`rsync`s `make redist` into `redist/`; it does not move the tree to
+`<build-name>/` or create a tarball. `build.sh` normalizes that to the same
+`<build-name>/`, `.tar.xz` and `.sha512sum` shape the dated branches produce.
 
 What it does: verifies the tarball against its `.sha512sum`, unpacks it to a
 staging directory *beside* the target and swaps it in (an interrupted install
@@ -121,12 +137,14 @@ location (`$STEAM_DIR` from the environment wins, then `~/.local/share/Steam`,
 is wrong:
 
 ```bash
-STEAM_DIR=/mnt/games/Steam ./build.sh cachyos --install-only
+STEAM_DIR=/mnt/games/Steam ./build.sh cachyos cachyos_11.0_release/_sauce --install-only
 ```
 
 Restart Steam, then select the tool in LMU's compatibility settings.
 
 ## The patches
+
+### GE series (13 patches)
 
 | Patch | Purpose |
 | --- | --- |
@@ -144,14 +162,40 @@ Restart Steam, then select the tool in LMU's compatibility settings.
 | 0012 | ICO/CUR loading in `d3dx9_36` — **LMU 1.4 VR init** |
 | 0013 | `BCryptDeriveKey` prepend/append buffers — **LMU 1.4 multiplayer join** |
 
-That is the GE series (13 patches) in `patches/wine/lmu/`. The cachyos series
-(14 patches) in `patches/wine/lmu-cachyos/` carries the same fixes in a different
-order and split, because cachyos' wine is Valve's rather than GE's and its `d2d1` has
-diverged. Each directory has its own README with the full per-patch detail,
+That is the GE series (13 patches) in `patches/wine/lmu/`. The older cachyos
+series (14 patches) in `patches/wine/lmu-cachyos/` carries the same fixes in a
+different order and split, because cachyos' wine is Valve's rather than GE's and
+its `d2d1` has diverged. Each directory has its own README with the full per-patch detail,
 including every rebase conflict and how it was resolved:
 
 - [`patches/wine/lmu/README.md`](patches/wine/lmu/README.md) — GE series
-- [`patches/wine/lmu-cachyos/README.md`](patches/wine/lmu-cachyos/README.md) — cachyos series
+- [`patches/wine/lmu-cachyos/README.md`](patches/wine/lmu-cachyos/README.md) — older cachyos series
+
+### proton-cachyos `_sauce` series (12 patches)
+
+`cachyos_11.0_release/_sauce` pins wine `e893f50`, which already ships a real
+`ID2D1SpriteBatch`, command-list layer support and the bcrypt prepend fix. Its
+series therefore carries only the missing LMU work, plus one build-compatibility
+patch for the SDK's FFmpeg 7:
+
+| Patch | Purpose |
+| --- | --- |
+| 0001 | `is_tinted`/`tint_colour` fields on `d2d_bitmap`, `effect_id` on `d2d_effect` |
+| 0002 | `Tint` effect stub and `CLSID_D2D1Tint` |
+| 0003 | `debug_d2d_matrix3x2_f` tracing helper |
+| 0004 | `DrawSpriteBatch` bitmap-target path — **the crash-fix companion** |
+| 0005 | Move the clip stack onto the bitmap |
+| 0006 | `PushLayer`/`PopLayer` implementation — without it the UI renders garbled |
+| 0007 | Tint compositing in `DrawImage` and the pixel shader |
+| 0008 | Stable `guidInstance` from names/serial/VID/PID so wheel bindings persist |
+| 0009 | `IDirectInput7::FindDevice` via the joystick cache — **wheel hotplug** |
+| 0010 | ICO/CUR loading in `d3dx9_36` — **LMU 1.4 VR init** |
+| 0011 | `BCryptDeriveKey` `KDF_SECRET_APPEND` support (prepend is already present) |
+| 0012 | Drop winedmo's PCM byte-order BSF, which no longer builds against FFmpeg 7 |
+
+See
+[`patches/wine/lmu-proton-cachyos-11.0-release-sauce/README.md`](patches/wine/lmu-proton-cachyos-11.0-release-sauce/README.md)
+for the detailed porting notes against `e893f50`.
 
 ### How each base is handled
 
@@ -159,7 +203,7 @@ including every rebase conflict and how it was resolved:
 | --- | --- | --- |
 | LMU series | `git am` into `wine/` | `git am` into `wine/` |
 | base patch layer | `protonprep-valve-staging.sh` | none — its Makefile applies `patches/<module>/*.patch` at build time |
-| archive | `.tar.gz` | `.tar.xz` |
+| archive | `.tar.gz` | `.tar.xz`; `_sauce` leaves `redist/` and `build.sh` creates the archive/checksum |
 
 Both bases end up with the series as **commits** in `wine/`, not in the working
 tree: GE's prep script does `git reset --hard HEAD` (uncommitted work would be
@@ -200,7 +244,7 @@ Each series is rebased onto a specific wine. Drop a rebased series into an
 override directory and the script picks it up automatically, most specific first:
 
 ```
-patches/wine/lmu-<version-id>/    e.g. lmu-proton-cachyos-11.0-20260713-slr/
+patches/wine/lmu-<version-id>/    e.g. lmu-proton-cachyos-11.0-release-sauce/
 patches/wine/lmu-<variant>/       e.g. lmu-cachyos/
 patches/wine/lmu/                 the GE series (default)
 ```
@@ -212,19 +256,23 @@ Versioned folders, so multiple builds coexist:
 ```
 ./
 ├── build.sh
-├── patches/wine/lmu/                        # GE series
-├── patches/wine/lmu-cachyos/                # cachyos series
-├── GE-Proton11-3-src/                       # cloned source tree
-├── GE-Proton11-3-build/                     # build dir + final package
-└── proton-cachyos-11.0-20260713-slr-build/  # …one pair per variant+version
+├── patches/wine/lmu/                                    # GE series
+├── patches/wine/lmu-cachyos/                            # older cachyos series
+├── patches/wine/lmu-proton-cachyos-11.0-release-sauce/  # _sauce series
+├── GE-Proton11-3-src/                                   # cloned source tree
+├── GE-Proton11-3-build/                                 # build dir + final package
+└── proton-cachyos-11.0-release-sauce-build/             # …one pair per variant+version
 ```
 
 ## Status
 
-Both bases build and package cleanly. What has actually been *run* differs, so
-here is exactly what is known, as of 2026-07-31:
+The GE and older cachyos series have the runtime history below, measured as of
+2026-07-31. The newer `cachyos_11.0_release/_sauce` series applies cleanly but
+has not been built or run yet.
 
-| | proton-cachyos | proton-ge-custom |
+### GE and older cachyos series
+
+| | older proton-cachyos | proton-ge-custom |
 | --- | --- | --- |
 | base tested | `cachyos_11.0_20260713/main` | `GE-Proton11-3` |
 | series applies | 14/14, clean | 13/13, clean |
@@ -236,25 +284,48 @@ here is exactly what is known, as of 2026-07-31:
 | multiplayer join (LMU 1.4) | **yes** | **yes** |
 | VR initialises (LMU 1.4) | not tested | not tested |
 
-The two LMU 1.4 patches were added on 2026-07-31 and both bases were rebuilt
-with them.
+### `cachyos_11.0_release/_sauce` series
 
-**Multiplayer join is confirmed in-game on both bases** — the `bcrypt`
-prepend/append fix (GE 0013, cachyos 0014) does what it is meant to.
+| | `_sauce` |
+| --- | --- |
+| wine base | `e893f50` (pinned by `cachyos_11.0_release/_sauce`) |
+| series applies | 12/12, clean |
+| builds | **yes** (28m52s clean build) |
+| fixes present in shipped DLLs | **yes**, both architectures (`d2d1` SpriteBatch/Layers, `dinput8`, `d3dx9_36`; `bcrypt` compiled) |
+| launches, loads onto track | not yet tested |
+| in-game UI renders correctly | not yet tested |
+| wheel reconnect mid-session | not yet tested |
+| multiplayer join (LMU 1.4) | not yet tested |
+| VR initialises (LMU 1.4) | not yet tested |
+
+The `_sauce` series applies cleanly to `e893f50`, and a clean
+`./build.sh cachyos cachyos_11.0_release/_sauce` completed on 2026-11-09 with a
+1.6 GiB tool tree and a 308 MiB `.tar.xz`. Patch 0012 is required because the
+SDK's FFmpeg 7 removed the internal BSF API used by `e893f50`'s old winedmo
+code. Runtime testing still has to happen on a machine with Steam, LMU and the
+relevant wheel/headset.
+
+For the older series, the two LMU 1.4 patches were added on 2026-07-31 and both
+bases were rebuilt with them.
+
+**Multiplayer join is confirmed in-game on the older series** — the `bcrypt`
+prepend/append fix (GE 0013, older cachyos 0014, `_sauce` 0011) does what it is
+meant to where it has been run.
 
 **VR initialisation is not tested, and will not be tested here** — there is no
-VR headset on this end. The `d3dx9_36` ICO/CUR patch (GE 0012, cachyos 0013) is
-build-verified only: the new code is in the shipped `d3dx9_36.dll` on both
-architectures for both bases, with no warning from `d3dx_helpers.c` in either
-log, but nothing has ever exercised the ICO/CUR path at runtime. It is carried
-because upstream ships it for LMU 1.4 and it cannot affect the non-VR paths, not
-because it is known to work.
+VR headset on this end. The `d3dx9_36` ICO/CUR patch (GE 0012, older cachyos
+0013, `_sauce` 0010) is build-verified only on the older series: the new code is
+in the shipped `d3dx9_36.dll` on both architectures for both older bases, with no
+warning from `d3dx_helpers.c` in either log, but nothing has ever exercised the
+ICO/CUR path at runtime. It is carried because upstream ships it for LMU 1.4 and
+it cannot affect the non-VR paths, not because it is known to work.
 
 **If you have a headset, this is the one thing the project cannot check itself.**
 A yes or a no is equally useful — see [Contributing](#contributing).
 
-The rows above it were measured with the series that predates these two
-patches; 0001–0011 are unchanged by this update.
+The GE and older cachyos rows were measured with the series that predates these
+two patches; GE 0001–0011 and older cachyos 0001–0012 are unchanged by that
+update.
 
 "Fixes present in shipped DLLs" means the built `d2d1.dll` contains
 `d2d_sprite_batch_create` and the Layers strings, and `dinput.dll` / `dinput8.dll`
@@ -262,8 +333,8 @@ patches; 0001–0011 are unchanged by this update.
 stub left. That proves the patches compiled into the package — not that they
 behave correctly.
 
-Both hotplug verifications are `WINEDEBUG=+dinput` captures of a Simagic wheel
-unplugged and reconnected while on track:
+The GE and older cachyos hotplug verifications are `WINEDEBUG=+dinput`
+captures of a Simagic wheel unplugged and reconnected while on track:
 
 ```
 hid_joystick_find_device ... matched instance {ae42ba3a-804c-11f1-8001-000044455354}
@@ -276,8 +347,9 @@ hid_joystick_send_force_feedback_command ... command 0x1
 Force feedback resumes, and `get_instance_from_guid ... not found` — the failure
 signature of the old stub — appears zero times in the whole log.
 
-Both bases resolve the wheel to the *same* `guidInstance`, which is what patch
-0007/0005 is for — existing bindings survive a switch between the two tools.
+The GE and older cachyos bases resolve the wheel to the *same* `guidInstance`,
+which is what GE 0007 and older cachyos 0005 are for — existing bindings survive
+a switch between the two tools. `_sauce` 0008 carries the same derivation.
 
 Neither log contains an unhandled exception, a `CreateSpriteBatch` fixme or any
 d2d1 error, and both shut down cleanly.
@@ -287,7 +359,7 @@ hardware exercises different HID report descriptors.
 
 ### Known-benign log noise
 
-Present on both bases, none of it caused by these patches:
+Present on the GE and older cachyos bases, none of it caused by these patches:
 
 - `warn:dinput:hid_joystick_find_device ... PID_0001&MI_00 ... not found`, once
   per reconnect. LMU also asks about the wheelbase's second HID interface, which
@@ -328,13 +400,17 @@ both used to surface much later as something unrelated:
   `git submodule update` considers them up to date and does nothing, so this
   never self-healed; the only symptom was `No rule to make target
   '.../configure.ac'`. They are now repopulated automatically with a forced
-  checkout from the submodule's own object store.
+  checkout from the submodule's own object store. Repopulating a parent also
+  exposes nested submodules the earlier recursive pass could not see, so the
+  script re-runs the recursive update before checking for uninitialized
+  submodules.
 
 Clone failures during the submodule step are retried three times — sourceware.org
 rate-limits `bzip2` with HTTP 429 fairly often.
 
 **The UI is garbled but the game runs.** Layers didn't apply — patches 0004–0006
-on GE, 0008–0011 on cachyos. Check they are in `git -C <version>-src/wine log`.
+on GE, 0008–0011 on older cachyos, and 0004–0007 on `_sauce`. Check they are in
+`git -C <version>-src/wine log`.
 
 **A wheel replugged mid-session isn't detected.** Capture a log — set LMU's Steam
 launch options to `WINEDEBUG=+dinput PROTON_LOG=1 %command%`, reproduce, then:
@@ -363,6 +439,16 @@ sha512sum xrandr-1.5.4.tar.xz   # must be 2758615a3d212cc5...379da5e5
 `-k` skips the certificate check, so **verify the hash** — it is the one Alpine
 publishes for this release, fetched over a valid connection. Do not skip that step.
 
+**`make succeeded but … has no proton script`.** Older `build.sh` versions
+expected `$BUILD_NAME/proton`; `cachyos_11.0_release/_sauce` only leaves
+`redist/`. Current `build.sh` normalizes `redist/` and creates the archive and
+checksum itself — update the script if you see this.
+
+**`winedmo` fails with `unknown type name 'AVBSFInternal'`.** `e893f50` predates
+CachyOS's winedmo/FFmpeg-7 revert. `_sauce` patch 0012 is that revert; if the
+series is stale or was partially applied, re-check that 0012 is in
+`git -C <version>-src/wine log`.
+
 **Build fails with `configure: No such file or directory`.** Stale stamps from
 `--no-clean`. Rebuild without it.
 
@@ -371,9 +457,10 @@ publishes for this release, fetched over a valid connection. Do not skip that st
 Issues and PRs welcome. Useful things to report:
 
 - **Whether VR initialises.** Top of the list: there is no headset here, so the
-  `d3dx9_36` ICO/CUR patch (GE 0012, cachyos 0013) has never been exercised at
-  runtime by anyone. "VR works" or "VR still fails" both close a real gap. If it
-  fails, a `PROTON_LOG=1` log around the point it gives up is what's needed.
+  `d3dx9_36` ICO/CUR patch (GE 0012, older cachyos 0013, `_sauce` 0010) has never
+  been exercised at runtime by anyone. "VR works" or "VR still fails" both close
+  a real gap. If it fails, a `PROTON_LOG=1` log around the point it gives up is
+  what's needed.
 - A `WINEDEBUG=+dinput PROTON_LOG=1` log for any input problem.
 - Whether the series applies to a newer GE tag or cachyos branch — and the
   rebased patches if you did the work.

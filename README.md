@@ -292,10 +292,10 @@ has not been built or run yet.
 | series applies | 12/12, clean |
 | builds | **yes** (28m52s clean build) |
 | fixes present in shipped DLLs | **yes**, both architectures (`d2d1` SpriteBatch/Layers, `dinput8`, `d3dx9_36`; `bcrypt` compiled) |
-| launches, loads onto track | not yet tested |
-| in-game UI renders correctly | not yet tested |
-| wheel reconnect mid-session | not yet tested |
-| multiplayer join (LMU 1.4) | not yet tested |
+| launches, loads onto track | **yes** |
+| in-game UI renders correctly | **yes** |
+| wheel reconnect mid-session | **yes** |
+| multiplayer join (LMU 1.4) | **yes** (Only practice session so far, will further later) |
 | VR initialises (LMU 1.4) | not yet tested |
 
 The `_sauce` series applies cleanly to `e893f50`, and a clean
